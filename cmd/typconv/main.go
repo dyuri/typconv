@@ -120,13 +120,16 @@ func runBin2Txt(cmd *cobra.Command, args []string) error {
 
 func stripXPMData(typ *model.TYPFile) {
 	for i := range typ.Points {
-		typ.Points[i].Icon = nil
+		typ.Points[i].DayIcon = nil
+		typ.Points[i].NightIcon = nil
 	}
 	for i := range typ.Lines {
-		typ.Lines[i].Pattern = nil
+		typ.Lines[i].DayPattern = nil
+		typ.Lines[i].NightPattern = nil
 	}
 	for i := range typ.Polygons {
-		typ.Polygons[i].Pattern = nil
+		typ.Polygons[i].DayPattern = nil
+		typ.Polygons[i].NightPattern = nil
 	}
 }
 

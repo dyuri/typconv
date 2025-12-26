@@ -498,8 +498,8 @@ func (r *Reader) readPointData(offset int64, typ, subtyp uint32) (model.PointTyp
 		}
 		pos += bytesRead
 
-		// Create bitmap object
-		pt.Icon = &model.Bitmap{
+		// Create day bitmap object
+		pt.DayIcon = &model.Bitmap{
 			Width:   width,
 			Height:  height,
 			Palette: palette,
@@ -509,13 +509,13 @@ func (r *Reader) readPointData(offset int64, typ, subtyp uint32) (model.PointTyp
 		// Set color mode based on BPP
 		switch bpp {
 		case 1:
-			pt.Icon.ColorMode = model.Monochrome
+			pt.DayIcon.ColorMode = model.Monochrome
 		case 4:
-			pt.Icon.ColorMode = model.Color16
+			pt.DayIcon.ColorMode = model.Color16
 		case 8:
-			pt.Icon.ColorMode = model.Color256
+			pt.DayIcon.ColorMode = model.Color256
 		default:
-			pt.Icon.ColorMode = model.Color256
+			pt.DayIcon.ColorMode = model.Color256
 		}
 	}
 
@@ -528,12 +528,13 @@ func (r *Reader) readPointData(offset int64, typ, subtyp uint32) (model.PointTyp
 
 		nightNcolors := int(buf[pos])
 		nightCtype := buf[pos+1]
-		_ = nightCtype // TODO: use for night color processing
+		_ = nightCtype // TODO: use for alpha channel processing
 		pos += 2
 
 		// Read night palette
+		var nightPalette []model.Color
 		if nightNcolors > 0 {
-			_, bytesRead, err = r.readColorTable(buf, pos, nightNcolors)
+			nightPalette, bytesRead, err = r.readColorTable(buf, pos, nightNcolors)
 			if err != nil {
 				return pt, fmt.Errorf("read night color table: %w", err)
 			}
@@ -543,12 +544,31 @@ func (r *Reader) readPointData(offset int64, typ, subtyp uint32) (model.PointTyp
 		// Read night bitmap
 		if width > 0 && height > 0 {
 			nightBpp := r.calculateBPP(nightNcolors)
-			_, bytesRead, err = r.readBitmap(buf, pos, width, height, nightBpp)
+			nightBitmapData, bytesRead, err := r.readBitmap(buf, pos, width, height, nightBpp)
 			if err != nil {
 				return pt, fmt.Errorf("read night bitmap: %w", err)
 			}
 			pos += bytesRead
-			// TODO: Store night bitmap separately
+
+			// Create night bitmap object
+			pt.NightIcon = &model.Bitmap{
+				Width:   width,
+				Height:  height,
+				Palette: nightPalette,
+				Data:    nightBitmapData,
+			}
+
+			// Set color mode based on BPP
+			switch nightBpp {
+			case 1:
+				pt.NightIcon.ColorMode = model.Monochrome
+			case 4:
+				pt.NightIcon.ColorMode = model.Color16
+			case 8:
+				pt.NightIcon.ColorMode = model.Color256
+			default:
+				pt.NightIcon.ColorMode = model.Color256
+			}
 		}
 	}
 
@@ -818,7 +838,7 @@ func (r *Reader) readPointType(offset int64) (model.PointType, int, error) {
 		if err != nil {
 			return model.PointType{}, 0, fmt.Errorf("read icon bitmap: %w", err)
 		}
-		pt.Icon = bitmap
+		pt.DayIcon = bitmap
 		pos += size
 	}
 
@@ -940,13 +960,15 @@ func (r *Reader) readPolylineData(offset int64, typ, subtyp uint32) (model.LineT
 			}
 			pos += bytesRead
 
-			lt.Pattern = &model.Bitmap{
+			// Same pattern for day and night
+			lt.DayPattern = &model.Bitmap{
 				Width:     32,
 				Height:    int(rows),
 				ColorMode: model.Monochrome,
 				Palette:   palette,
 				Data:      bitmapData,
 			}
+			lt.NightPattern = lt.DayPattern // Share same bitmap
 		} else {
 			// Solid colors (line and border, same for day/night)
 			if pos+8 > len(buf) {
@@ -978,21 +1000,30 @@ func (r *Reader) readPolylineData(offset int64, typ, subtyp uint32) (model.LineT
 			nightPalette[0] = model.Color{R: buf[pos+11], G: buf[pos+10], B: buf[pos+9], Alpha: 255}
 			pos += 12
 
-			// Read pattern bitmap (same for day and night in data, but different palettes)
+			// Read pattern bitmap (same bitmap data, but different palettes for day/night)
 			bitmapData, bytesRead, err := r.readBitmap(buf, pos, 32, int(rows), 1)
 			if err != nil {
 				return lt, fmt.Errorf("read pattern bitmap: %w", err)
 			}
 			pos += bytesRead
 
-			lt.Pattern = &model.Bitmap{
+			// Store day pattern
+			lt.DayPattern = &model.Bitmap{
 				Width:     32,
 				Height:    int(rows),
 				ColorMode: model.Monochrome,
-				Palette:   dayPalette, // Use day palette for now
+				Palette:   dayPalette,
 				Data:      bitmapData,
 			}
-			// TODO: Store night palette separately
+
+			// Store night pattern (same data, different palette)
+			lt.NightPattern = &model.Bitmap{
+				Width:     32,
+				Height:    int(rows),
+				ColorMode: model.Monochrome,
+				Palette:   nightPalette,
+				Data:      bitmapData, // Same bitmap data
+			}
 		} else {
 			// Day and night solid colors
 			if pos+14 > len(buf) {
@@ -1028,12 +1059,22 @@ func (r *Reader) readPolylineData(offset int64, typ, subtyp uint32) (model.LineT
 			}
 			pos += bytesRead
 
-			lt.Pattern = &model.Bitmap{
+			// Store day pattern
+			lt.DayPattern = &model.Bitmap{
 				Width:     32,
 				Height:    int(rows),
 				ColorMode: model.Monochrome,
 				Palette:   dayPalette,
 				Data:      bitmapData,
+			}
+
+			// Store night pattern
+			lt.NightPattern = &model.Bitmap{
+				Width:     32,
+				Height:    int(rows),
+				ColorMode: model.Monochrome,
+				Palette:   nightPalette,
+				Data:      bitmapData, // Same bitmap data
 			}
 		} else {
 			// Solid colors
@@ -1069,12 +1110,22 @@ func (r *Reader) readPolylineData(offset int64, typ, subtyp uint32) (model.LineT
 			}
 			pos += bytesRead
 
-			lt.Pattern = &model.Bitmap{
+			// Store day pattern
+			lt.DayPattern = &model.Bitmap{
 				Width:     32,
 				Height:    int(rows),
 				ColorMode: model.Monochrome,
 				Palette:   dayPalette,
 				Data:      bitmapData,
+			}
+
+			// Store night pattern
+			lt.NightPattern = &model.Bitmap{
+				Width:     32,
+				Height:    int(rows),
+				ColorMode: model.Monochrome,
+				Palette:   nightPalette,
+				Data:      bitmapData, // Same bitmap data
 			}
 		} else {
 			// Solid colors
@@ -1106,13 +1157,15 @@ func (r *Reader) readPolylineData(offset int64, typ, subtyp uint32) (model.LineT
 			}
 			pos += bytesRead
 
-			lt.Pattern = &model.Bitmap{
+			// Same pattern for day and night
+			lt.DayPattern = &model.Bitmap{
 				Width:     32,
 				Height:    int(rows),
 				ColorMode: model.Monochrome,
 				Palette:   palette,
 				Data:      bitmapData,
 			}
+			lt.NightPattern = lt.DayPattern // Share same bitmap
 		} else {
 			// Solid color, no border
 			if pos+4 > len(buf) {
@@ -1146,14 +1199,23 @@ func (r *Reader) readPolylineData(offset int64, typ, subtyp uint32) (model.LineT
 			}
 			pos += bytesRead
 
-			lt.Pattern = &model.Bitmap{
+			// Store day pattern
+			lt.DayPattern = &model.Bitmap{
 				Width:     32,
 				Height:    int(rows),
 				ColorMode: model.Monochrome,
 				Palette:   dayPalette,
 				Data:      bitmapData,
 			}
-			// TODO: Store night palette separately
+
+			// Store night pattern
+			lt.NightPattern = &model.Bitmap{
+				Width:     32,
+				Height:    int(rows),
+				ColorMode: model.Monochrome,
+				Palette:   nightPalette,
+				Data:      bitmapData, // Same bitmap data
+			}
 		} else {
 			// Separate day/night solid colors, no border
 			if pos+7 > len(buf) {
@@ -1396,13 +1458,15 @@ func (r *Reader) readPolygonData(offset int64, typ, subtyp uint32) (model.Polygo
 		}
 		pos += bytesRead
 
-		poly.Pattern = &model.Bitmap{
+		// Same pattern for day and night
+		poly.DayPattern = &model.Bitmap{
 			Width:     32,
 			Height:    32,
 			ColorMode: model.Monochrome,
 			Palette:   palette,
 			Data:      bitmapData,
 		}
+		poly.NightPattern = poly.DayPattern // Share same bitmap
 
 	case 0x09:
 		// Day & night different patterns (4 colors total)
@@ -1424,14 +1488,23 @@ func (r *Reader) readPolygonData(offset int64, typ, subtyp uint32) (model.Polygo
 		}
 		pos += bytesRead
 
-		poly.Pattern = &model.Bitmap{
+		// Store day pattern
+		poly.DayPattern = &model.Bitmap{
 			Width:     32,
 			Height:    32,
 			ColorMode: model.Monochrome,
-			Palette:   dayPalette, // Use day palette
+			Palette:   dayPalette,
 			Data:      bitmapData,
 		}
-		// TODO: Store night palette separately
+
+		// Store night pattern
+		poly.NightPattern = &model.Bitmap{
+			Width:     32,
+			Height:    32,
+			ColorMode: model.Monochrome,
+			Palette:   nightPalette,
+			Data:      bitmapData, // Same bitmap data
+		}
 
 	case 0x0B:
 		// Day with transparency + night 2-color
@@ -1452,12 +1525,22 @@ func (r *Reader) readPolygonData(offset int64, typ, subtyp uint32) (model.Polygo
 		}
 		pos += bytesRead
 
-		poly.Pattern = &model.Bitmap{
+		// Store day pattern
+		poly.DayPattern = &model.Bitmap{
 			Width:     32,
 			Height:    32,
 			ColorMode: model.Monochrome,
 			Palette:   dayPalette,
 			Data:      bitmapData,
+		}
+
+		// Store night pattern
+		poly.NightPattern = &model.Bitmap{
+			Width:     32,
+			Height:    32,
+			ColorMode: model.Monochrome,
+			Palette:   nightPalette,
+			Data:      bitmapData, // Same bitmap data
 		}
 
 	case 0x0D:
@@ -1479,12 +1562,22 @@ func (r *Reader) readPolygonData(offset int64, typ, subtyp uint32) (model.Polygo
 		}
 		pos += bytesRead
 
-		poly.Pattern = &model.Bitmap{
+		// Store day pattern
+		poly.DayPattern = &model.Bitmap{
 			Width:     32,
 			Height:    32,
 			ColorMode: model.Monochrome,
 			Palette:   dayPalette,
 			Data:      bitmapData,
+		}
+
+		// Store night pattern
+		poly.NightPattern = &model.Bitmap{
+			Width:     32,
+			Height:    32,
+			ColorMode: model.Monochrome,
+			Palette:   nightPalette,
+			Data:      bitmapData, // Same bitmap data
 		}
 
 	case 0x0E:
@@ -1503,13 +1596,15 @@ func (r *Reader) readPolygonData(offset int64, typ, subtyp uint32) (model.Polygo
 		}
 		pos += bytesRead
 
-		poly.Pattern = &model.Bitmap{
+		// Same pattern for day and night
+		poly.DayPattern = &model.Bitmap{
 			Width:     32,
 			Height:    32,
 			ColorMode: model.Monochrome,
 			Palette:   palette,
 			Data:      bitmapData,
 		}
+		poly.NightPattern = poly.DayPattern // Share same bitmap
 
 	default:
 		// Unknown color type

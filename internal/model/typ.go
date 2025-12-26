@@ -26,7 +26,8 @@ type PointType struct {
 	Type       int               // Type code (e.g., 0x2f06)
 	SubType    int               // SubType (0x00-0x1F, or extended)
 	Labels     map[string]string // Language code -> label text (e.g., "04" -> "Trail Junction")
-	Icon       *Bitmap           // Icon bitmap (optional)
+	DayIcon    *Bitmap           // Day icon bitmap (optional)
+	NightIcon  *Bitmap           // Night icon bitmap (optional, if separate)
 	DayColor   Color             // Day display color
 	NightColor Color             // Night display color
 	FontStyle  FontStyle         // Label font style
@@ -45,7 +46,8 @@ type LineType struct {
 	NightBorderColor Color             // Night border color
 	UseOrientation   bool              // Whether line has direction
 	LineStyle        LineStyle         // Solid, dashed, dotted, etc.
-	Pattern          *Bitmap           // Line pattern bitmap (optional)
+	DayPattern       *Bitmap           // Day line pattern bitmap (optional)
+	NightPattern     *Bitmap           // Night line pattern bitmap (optional, if separate)
 }
 
 // PolygonType represents an area feature (forest, water, building, etc.)
@@ -53,7 +55,8 @@ type PolygonType struct {
 	Type           int               // Type code
 	SubType        int               // SubType
 	Labels         map[string]string // Language-specific labels
-	Pattern        *Bitmap           // Fill pattern bitmap (optional)
+	DayPattern     *Bitmap           // Day fill pattern bitmap (optional)
+	NightPattern   *Bitmap           // Night fill pattern bitmap (optional, if separate)
 	DayColor       Color             // Day fill color
 	NightColor     Color             // Night fill color
 	FontStyle      FontStyle         // Label font style

@@ -8,20 +8,26 @@ import (
 
 // TestReadHeader tests basic header parsing
 func TestReadHeader(t *testing.T) {
-	// Create a minimal TYP header
-	buf := make([]byte, 64)
+	// Create a minimal TYP header (needs at least 256 bytes for full header)
+	buf := make([]byte, 256)
 
-	// Offset 0x0A: Version = 1
-	binary.LittleEndian.PutUint16(buf[0x0A:], 1)
+	// Offset 0x00-0x01: Descriptor
+	binary.LittleEndian.PutUint16(buf[0x00:], 0x5B)
 
-	// Offset 0x0C: CodePage = 1252
-	binary.LittleEndian.PutUint16(buf[0x0C:], 1252)
+	// Offset 0x02-0x0B: "GARMIN TYP" signature
+	copy(buf[0x02:], "GARMIN TYP")
 
-	// Offset 0x0E: FID = 3511
-	binary.LittleEndian.PutUint16(buf[0x0E:], 3511)
+	// Offset 0x0C: Version = 1
+	binary.LittleEndian.PutUint16(buf[0x0C:], 1)
 
-	// Offset 0x10: PID = 1
-	binary.LittleEndian.PutUint16(buf[0x10:], 1)
+	// Offset 0x15: CodePage = 1252
+	binary.LittleEndian.PutUint16(buf[0x15:], 1252)
+
+	// Offset 0x31: FID = 3511
+	binary.LittleEndian.PutUint16(buf[0x31:], 3511)
+
+	// Offset 0x2F: PID = 1
+	binary.LittleEndian.PutUint16(buf[0x2F:], 1)
 
 	reader := NewReader(bytes.NewReader(buf), int64(len(buf)))
 	header, err := reader.ReadHeader()

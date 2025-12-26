@@ -119,9 +119,15 @@ func (w *Writer) writePointType(pt model.PointType) error {
 			pt.NightColor.R, pt.NightColor.G, pt.NightColor.B)
 	}
 
-	// Icon bitmap
-	if pt.Icon != nil {
-		if err := w.writeXPM(pt.Icon, "IconXpm"); err != nil {
+	// Icon bitmaps
+	if pt.DayIcon != nil {
+		if err := w.writeXPM(pt.DayIcon, "DayXpm"); err != nil {
+			return err
+		}
+	}
+
+	if pt.NightIcon != nil && pt.NightIcon != pt.DayIcon {
+		if err := w.writeXPM(pt.NightIcon, "NightXpm"); err != nil {
 			return err
 		}
 	}
@@ -137,15 +143,61 @@ func (w *Writer) writePointType(pt model.PointType) error {
 func (w *Writer) writeLineType(lt model.LineType) error {
 	fmt.Fprintf(w.w, "[_line]\n")
 
-	// TODO: Implement line type writing
-	// - Type and SubType
-	// - Line width and border
-	// - Colors
-	// - Line style
-	// - Pattern bitmap
+	// Type code
+	if lt.SubType != 0 {
+		fmt.Fprintf(w.w, "Type=0x%x\nSubType=0x%x\n", lt.Type, lt.SubType)
+	} else {
+		fmt.Fprintf(w.w, "Type=0x%x\n", lt.Type)
+	}
 
-	fmt.Fprintf(w.w, "Type=0x%x\n", lt.Type)
-	// ... more fields ...
+	// Labels
+	for langCode, text := range lt.Labels {
+		fmt.Fprintf(w.w, "String1=0x%s,%s\n", langCode, text)
+	}
+
+	// Line width
+	if lt.LineWidth > 0 {
+		fmt.Fprintf(w.w, "LineWidth=%d\n", lt.LineWidth)
+	}
+
+	// Border width
+	if lt.BorderWidth > 0 {
+		fmt.Fprintf(w.w, "BorderWidth=%d\n", lt.BorderWidth)
+	}
+
+	// Colors
+	if !lt.DayColor.IsZero() {
+		fmt.Fprintf(w.w, "DayColor=#%02x%02x%02x\n",
+			lt.DayColor.R, lt.DayColor.G, lt.DayColor.B)
+	}
+
+	if !lt.NightColor.IsZero() {
+		fmt.Fprintf(w.w, "NightColor=#%02x%02x%02x\n",
+			lt.NightColor.R, lt.NightColor.G, lt.NightColor.B)
+	}
+
+	if !lt.DayBorderColor.IsZero() {
+		fmt.Fprintf(w.w, "DayBorderColor=#%02x%02x%02x\n",
+			lt.DayBorderColor.R, lt.DayBorderColor.G, lt.DayBorderColor.B)
+	}
+
+	if !lt.NightBorderColor.IsZero() {
+		fmt.Fprintf(w.w, "NightBorderColor=#%02x%02x%02x\n",
+			lt.NightBorderColor.R, lt.NightBorderColor.G, lt.NightBorderColor.B)
+	}
+
+	// Line pattern bitmaps
+	if lt.DayPattern != nil {
+		if err := w.writeXPM(lt.DayPattern, "DayXpm"); err != nil {
+			return err
+		}
+	}
+
+	if lt.NightPattern != nil && lt.NightPattern != lt.DayPattern {
+		if err := w.writeXPM(lt.NightPattern, "NightXpm"); err != nil {
+			return err
+		}
+	}
 
 	fmt.Fprintf(w.w, "[end]\n\n")
 	return nil
@@ -155,13 +207,41 @@ func (w *Writer) writeLineType(lt model.LineType) error {
 func (w *Writer) writePolygonType(poly model.PolygonType) error {
 	fmt.Fprintf(w.w, "[_polygon]\n")
 
-	// TODO: Implement polygon type writing
-	// - Type and SubType
-	// - Colors
-	// - Pattern bitmap
+	// Type code
+	if poly.SubType != 0 {
+		fmt.Fprintf(w.w, "Type=0x%x\nSubType=0x%x\n", poly.Type, poly.SubType)
+	} else {
+		fmt.Fprintf(w.w, "Type=0x%x\n", poly.Type)
+	}
 
-	fmt.Fprintf(w.w, "Type=0x%x\n", poly.Type)
-	// ... more fields ...
+	// Labels
+	for langCode, text := range poly.Labels {
+		fmt.Fprintf(w.w, "String1=0x%s,%s\n", langCode, text)
+	}
+
+	// Colors
+	if !poly.DayColor.IsZero() {
+		fmt.Fprintf(w.w, "DayColor=#%02x%02x%02x\n",
+			poly.DayColor.R, poly.DayColor.G, poly.DayColor.B)
+	}
+
+	if !poly.NightColor.IsZero() {
+		fmt.Fprintf(w.w, "NightColor=#%02x%02x%02x\n",
+			poly.NightColor.R, poly.NightColor.G, poly.NightColor.B)
+	}
+
+	// Polygon pattern bitmaps
+	if poly.DayPattern != nil {
+		if err := w.writeXPM(poly.DayPattern, "DayXpm"); err != nil {
+			return err
+		}
+	}
+
+	if poly.NightPattern != nil && poly.NightPattern != poly.DayPattern {
+		if err := w.writeXPM(poly.NightPattern, "NightXpm"); err != nil {
+			return err
+		}
+	}
 
 	fmt.Fprintf(w.w, "[end]\n\n")
 	return nil
