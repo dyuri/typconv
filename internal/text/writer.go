@@ -177,15 +177,73 @@ func (w *Writer) writeXPM(bmp *model.Bitmap, tag string) error {
 	// "!      !"
 	// ...
 
-	// Header: "width height numColors charsPerPixel"
+	// Palette - use all printable ASCII characters (excluding space and quote)
+	// This gives us 94 single-char codes. For more colors, we'd need multi-char codes.
+	chars := "!#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~"
+
+	// If we need more than 94 colors, use two-character combinations
+	if len(bmp.Palette) > len(chars) {
+		// Generate two-character codes
+		var extendedChars []string
+		for _, c1 := range chars {
+			for _, c2 := range chars {
+				extendedChars = append(extendedChars, string([]byte{byte(c1), byte(c2)}))
+				if len(extendedChars) >= 255 {
+					break
+				}
+			}
+			if len(extendedChars) >= 255 {
+				break
+			}
+		}
+
+		if len(bmp.Palette) > 255 {
+			return fmt.Errorf("too many colors for XPM encoding: %d (max 255)", len(bmp.Palette))
+		}
+
+		// Write header with chars-per-pixel=2
+		fmt.Fprintf(w.w, "%s=\"%d %d %d 2\"\n",
+			tag, bmp.Width, bmp.Height, len(bmp.Palette))
+
+		// Write palette with multi-char codes
+		for i, color := range bmp.Palette {
+			code := extendedChars[i]
+			if color.R == 0 && color.G == 0 && color.B == 0 && color.Alpha == 0 {
+				fmt.Fprintf(w.w, "\"%s c none\"\n", code)
+			} else {
+				fmt.Fprintf(w.w, "\"%s c #%02x%02x%02x\"\n",
+					code, color.R, color.G, color.B)
+			}
+		}
+
+		// Pixel data with two-char codes
+		for y := 0; y < bmp.Height; y++ {
+			fmt.Fprintf(w.w, "\"")
+			for x := 0; x < bmp.Width; x++ {
+				idx := y*bmp.Width + x
+				if idx >= len(bmp.Data) {
+					return fmt.Errorf("bitmap data too short")
+				}
+				pixelIdx := bmp.Data[idx]
+				if int(pixelIdx) >= len(extendedChars) {
+					return fmt.Errorf("pixel index out of range: %d", pixelIdx)
+				}
+				fmt.Fprintf(w.w, "%s", extendedChars[pixelIdx])
+			}
+			fmt.Fprintf(w.w, "\"\n")
+		}
+
+		return nil
+	}
+
+	// Single-character codes (original code path)
+	// Write header with chars-per-pixel=1
 	fmt.Fprintf(w.w, "%s=\"%d %d %d 1\"\n",
 		tag, bmp.Width, bmp.Height, len(bmp.Palette))
 
-	// Palette
-	chars := "!@#$%^&*()_+-=[]{}|;:,.<>?abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 	for i, color := range bmp.Palette {
 		if i >= len(chars) {
-			return fmt.Errorf("too many colors for XPM encoding")
+			return fmt.Errorf("too many colors for XPM encoding: %d", len(bmp.Palette))
 		}
 
 		char := chars[i]

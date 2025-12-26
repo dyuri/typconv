@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/dyuri/typconv/internal/model"
+	"github.com/dyuri/typconv/pkg/typconv"
 	"github.com/spf13/cobra"
 )
 
@@ -65,14 +67,79 @@ func runBin2Txt(cmd *cobra.Command, args []string) error {
 	noXPM, _ := cmd.Flags().GetBool("no-xpm")
 	noLabels, _ := cmd.Flags().GetBool("no-labels")
 
-	// TODO: Implement bin2txt
-	_ = inputPath
-	_ = outputPath
-	_ = format
-	_ = noXPM
-	_ = noLabels
+	// Open input file
+	f, err := os.Open(inputPath)
+	if err != nil {
+		return fmt.Errorf("open input file: %w", err)
+	}
+	defer f.Close()
 
-	return fmt.Errorf("bin2txt not yet implemented")
+	// Get file size
+	stat, err := f.Stat()
+	if err != nil {
+		return fmt.Errorf("stat input file: %w", err)
+	}
+
+	// Parse binary TYP
+	typ, err := typconv.ParseBinaryTYP(f, stat.Size())
+	if err != nil {
+		return fmt.Errorf("parse TYP file: %w", err)
+	}
+
+	// Apply filters
+	if noXPM {
+		stripXPMData(typ)
+	}
+	if noLabels {
+		stripLabels(typ)
+	}
+
+	// Determine output writer
+	var output *os.File
+	if outputPath == "" {
+		output = os.Stdout
+	} else {
+		output, err = os.Create(outputPath)
+		if err != nil {
+			return fmt.Errorf("create output file: %w", err)
+		}
+		defer output.Close()
+	}
+
+	// Write output
+	switch format {
+	case "mkgmap":
+		return typconv.WriteTextTYP(output, typ)
+	case "json":
+		// TODO: Implement JSON output
+		return fmt.Errorf("JSON format not yet implemented")
+	default:
+		return fmt.Errorf("unknown format: %s", format)
+	}
+}
+
+func stripXPMData(typ *model.TYPFile) {
+	for i := range typ.Points {
+		typ.Points[i].Icon = nil
+	}
+	for i := range typ.Lines {
+		typ.Lines[i].Pattern = nil
+	}
+	for i := range typ.Polygons {
+		typ.Polygons[i].Pattern = nil
+	}
+}
+
+func stripLabels(typ *model.TYPFile) {
+	for i := range typ.Points {
+		typ.Points[i].Labels = make(map[string]string)
+	}
+	for i := range typ.Lines {
+		typ.Lines[i].Labels = make(map[string]string)
+	}
+	for i := range typ.Polygons {
+		typ.Polygons[i].Labels = make(map[string]string)
+	}
 }
 
 // txt2bin command

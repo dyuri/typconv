@@ -4,7 +4,23 @@
       "Bash(go mod init:*)",
       "Bash(go get:*)",
       "Bash(make build:*)",
-      "Bash(./build/typconv:*)"
+      "Bash(./build/typconv:*)",
+      "Bash(go test:*)",
+      "Bash(make test:*)",
+      "Bash(xxd:*)",
+      "Bash(printf:*)",
+      "Bash(chmod:*)",
+      "Bash(python3:*)",
+      "Bash(for file in testdata/binary/*.typ)",
+      "Bash(done)",
+      "Bash(do echo \"=== Testing $file ===\")",
+      "Bash(ls:*)",
+      "WebFetch(domain:www.pinns.co.uk)",
+      "WebFetch(domain:github.com)",
+      "Skill(web-browser)",
+      "Bash(./tools/nav.js:*)",
+      "Bash(./tools/eval.js 'JSON.stringify\\(Array.from\\(document.querySelectorAll\\(\"\".search-title a\"\"\\)\\).slice\\(0, 20\\).map\\(a => \\({ file: a.textContent.trim\\(\\), href: a.href }\\)\\)\\)')",
+      "Bash(./tools/eval.js 'document.querySelector\\(\"\".blob-code-content\"\"\\) ? Array.from\\(document.querySelectorAll\\(\"\".blob-code-content\"\"\\)\\).map\\(e => e.textContent\\).join\\(\"\"\\\\n\"\"\\) : document.querySelector\\(\"\"pre\"\"\\) ? document.querySelector\\(\"\"pre\"\"\\).textContent : \"\"Not found\"\"')"
     ]
   }
 }
