@@ -888,6 +888,306 @@ func (r *Reader) readPointType(offset int64) (model.PointType, int, error) {
 	return pt, pos, nil
 }
 
+// readPolylineData reads a single polyline type definition from the data section
+func (r *Reader) readPolylineData(offset int64, typ, subtyp uint32) (model.LineType, error) {
+	// Read first 2 bytes: ctyp/rows and flags
+	buf := make([]byte, 4096)
+	n, err := r.r.ReadAt(buf, offset)
+	if err != nil && err != io.EOF {
+		return model.LineType{}, err
+	}
+	buf = buf[:n]
+
+	if len(buf) < 2 {
+		return model.LineType{}, fmt.Errorf("buffer too small: %d bytes", len(buf))
+	}
+
+	ctypRows := buf[0]
+	flags := buf[1]
+
+	ctyp := ctypRows & 0x07      // Bits 0-2: color type
+	rows := ctypRows >> 3        // Bits 3-7: pattern height
+	hasLabels := (flags & 0x01) != 0
+	hasTextColors := (flags & 0x04) != 0
+
+	lt := model.LineType{
+		Type:    int(typ),
+		SubType: int(subtyp),
+		Labels:  make(map[string]string),
+	}
+
+	pos := 2
+
+	// Read color/pattern data based on ctyp
+	switch ctyp {
+	case 0x00:
+		// Single day/night mode
+		if rows > 0 {
+			// Pattern bitmap (32×rows, 2 colors, 1 bpp)
+			if pos+6 > len(buf) {
+				return lt, fmt.Errorf("buffer too small for pattern colors")
+			}
+			// Read 2-color palette (BGR format)
+			palette := make([]model.Color, 2)
+			palette[1] = model.Color{R: buf[pos+2], G: buf[pos+1], B: buf[pos], Alpha: 255}
+			palette[0] = model.Color{R: buf[pos+5], G: buf[pos+4], B: buf[pos+3], Alpha: 255}
+			pos += 6
+
+			// Read pattern bitmap
+			bitmapData, bytesRead, err := r.readBitmap(buf, pos, 32, int(rows), 1)
+			if err != nil {
+				return lt, fmt.Errorf("read pattern bitmap: %w", err)
+			}
+			pos += bytesRead
+
+			lt.Pattern = &model.Bitmap{
+				Width:     32,
+				Height:    int(rows),
+				ColorMode: model.Monochrome,
+				Palette:   palette,
+				Data:      bitmapData,
+			}
+		} else {
+			// Solid colors (line and border, same for day/night)
+			if pos+8 > len(buf) {
+				return lt, fmt.Errorf("buffer too small for line colors")
+			}
+			lt.DayColor = model.Color{R: buf[pos+2], G: buf[pos+1], B: buf[pos], Alpha: 255}
+			lt.DayBorderColor = model.Color{R: buf[pos+5], G: buf[pos+4], B: buf[pos+3], Alpha: 255}
+			lt.LineWidth = int(buf[pos+6])
+			lt.BorderWidth = int(buf[pos+7])
+			lt.NightColor = lt.DayColor
+			lt.NightBorderColor = lt.DayBorderColor
+			pos += 8
+		}
+
+	case 0x01:
+		// Separate day/night
+		if rows > 0 {
+			// Day and night pattern bitmaps
+			if pos+12 > len(buf) {
+				return lt, fmt.Errorf("buffer too small for day/night pattern colors")
+			}
+			// Day palette
+			dayPalette := make([]model.Color, 2)
+			dayPalette[1] = model.Color{R: buf[pos+2], G: buf[pos+1], B: buf[pos], Alpha: 255}
+			dayPalette[0] = model.Color{R: buf[pos+5], G: buf[pos+4], B: buf[pos+3], Alpha: 255}
+			// Night palette
+			nightPalette := make([]model.Color, 2)
+			nightPalette[1] = model.Color{R: buf[pos+8], G: buf[pos+7], B: buf[pos+6], Alpha: 255}
+			nightPalette[0] = model.Color{R: buf[pos+11], G: buf[pos+10], B: buf[pos+9], Alpha: 255}
+			pos += 12
+
+			// Read pattern bitmap (same for day and night in data, but different palettes)
+			bitmapData, bytesRead, err := r.readBitmap(buf, pos, 32, int(rows), 1)
+			if err != nil {
+				return lt, fmt.Errorf("read pattern bitmap: %w", err)
+			}
+			pos += bytesRead
+
+			lt.Pattern = &model.Bitmap{
+				Width:     32,
+				Height:    int(rows),
+				ColorMode: model.Monochrome,
+				Palette:   dayPalette, // Use day palette for now
+				Data:      bitmapData,
+			}
+			// TODO: Store night palette separately
+		} else {
+			// Day and night solid colors
+			if pos+14 > len(buf) {
+				return lt, fmt.Errorf("buffer too small for day/night colors")
+			}
+			lt.DayColor = model.Color{R: buf[pos+2], G: buf[pos+1], B: buf[pos], Alpha: 255}
+			lt.DayBorderColor = model.Color{R: buf[pos+5], G: buf[pos+4], B: buf[pos+3], Alpha: 255}
+			lt.NightColor = model.Color{R: buf[pos+8], G: buf[pos+7], B: buf[pos+6], Alpha: 255}
+			lt.NightBorderColor = model.Color{R: buf[pos+11], G: buf[pos+10], B: buf[pos+9], Alpha: 255}
+			lt.LineWidth = int(buf[pos+12])
+			lt.BorderWidth = int(buf[pos+13])
+			pos += 14
+		}
+
+	case 0x03:
+		// Day with transparency, night solid
+		if rows > 0 {
+			// Pattern bitmaps
+			if pos+9 > len(buf) {
+				return lt, fmt.Errorf("buffer too small for transparent pattern colors")
+			}
+			dayPalette := make([]model.Color, 2)
+			dayPalette[1] = model.Color{R: buf[pos+2], G: buf[pos+1], B: buf[pos], Alpha: 255}
+			dayPalette[0] = model.Color{R: 255, G: 255, B: 255, Alpha: 0} // Transparent
+			nightPalette := make([]model.Color, 2)
+			nightPalette[1] = model.Color{R: buf[pos+5], G: buf[pos+4], B: buf[pos+3], Alpha: 255}
+			nightPalette[0] = model.Color{R: buf[pos+8], G: buf[pos+7], B: buf[pos+6], Alpha: 255}
+			pos += 9
+
+			bitmapData, bytesRead, err := r.readBitmap(buf, pos, 32, int(rows), 1)
+			if err != nil {
+				return lt, fmt.Errorf("read pattern bitmap: %w", err)
+			}
+			pos += bytesRead
+
+			lt.Pattern = &model.Bitmap{
+				Width:     32,
+				Height:    int(rows),
+				ColorMode: model.Monochrome,
+				Palette:   dayPalette,
+				Data:      bitmapData,
+			}
+		} else {
+			// Solid colors
+			if pos+13 > len(buf) {
+				return lt, fmt.Errorf("buffer too small for colors")
+			}
+			lt.DayColor = model.Color{R: buf[pos+2], G: buf[pos+1], B: buf[pos], Alpha: 255}
+			lt.NightColor = model.Color{R: buf[pos+5], G: buf[pos+4], B: buf[pos+3], Alpha: 255}
+			lt.NightBorderColor = model.Color{R: buf[pos+8], G: buf[pos+7], B: buf[pos+6], Alpha: 255}
+			lt.LineWidth = int(buf[pos+9])
+			lt.BorderWidth = int(buf[pos+10])
+			pos += 11 // Note: Width fields might be different size
+		}
+
+	case 0x05:
+		// Day solid, night with transparency
+		if rows > 0 {
+			// Pattern bitmaps
+			if pos+9 > len(buf) {
+				return lt, fmt.Errorf("buffer too small for pattern colors")
+			}
+			dayPalette := make([]model.Color, 2)
+			dayPalette[1] = model.Color{R: buf[pos+2], G: buf[pos+1], B: buf[pos], Alpha: 255}
+			dayPalette[0] = model.Color{R: buf[pos+5], G: buf[pos+4], B: buf[pos+3], Alpha: 255}
+			nightPalette := make([]model.Color, 2)
+			nightPalette[1] = model.Color{R: buf[pos+8], G: buf[pos+7], B: buf[pos+6], Alpha: 255}
+			nightPalette[0] = model.Color{R: 255, G: 255, B: 255, Alpha: 0} // Transparent
+			pos += 9
+
+			bitmapData, bytesRead, err := r.readBitmap(buf, pos, 32, int(rows), 1)
+			if err != nil {
+				return lt, fmt.Errorf("read pattern bitmap: %w", err)
+			}
+			pos += bytesRead
+
+			lt.Pattern = &model.Bitmap{
+				Width:     32,
+				Height:    int(rows),
+				ColorMode: model.Monochrome,
+				Palette:   dayPalette,
+				Data:      bitmapData,
+			}
+		} else {
+			// Solid colors
+			if pos+10 > len(buf) {
+				return lt, fmt.Errorf("buffer too small for colors")
+			}
+			lt.DayColor = model.Color{R: buf[pos+2], G: buf[pos+1], B: buf[pos], Alpha: 255}
+			lt.DayBorderColor = model.Color{R: buf[pos+5], G: buf[pos+4], B: buf[pos+3], Alpha: 255}
+			lt.NightColor = model.Color{R: buf[pos+8], G: buf[pos+7], B: buf[pos+6], Alpha: 255}
+			lt.LineWidth = int(buf[pos+9])
+			pos += 10
+		}
+
+	case 0x06:
+		// Single day/night with transparency, no border
+		if rows > 0 {
+			// Pattern bitmap with transparency
+			if pos+3 > len(buf) {
+				return lt, fmt.Errorf("buffer too small for pattern color")
+			}
+			palette := make([]model.Color, 2)
+			palette[1] = model.Color{R: buf[pos+2], G: buf[pos+1], B: buf[pos], Alpha: 255}
+			palette[0] = model.Color{R: 255, G: 255, B: 255, Alpha: 0} // Transparent
+			pos += 3
+
+			bitmapData, bytesRead, err := r.readBitmap(buf, pos, 32, int(rows), 1)
+			if err != nil {
+				return lt, fmt.Errorf("read pattern bitmap: %w", err)
+			}
+			pos += bytesRead
+
+			lt.Pattern = &model.Bitmap{
+				Width:     32,
+				Height:    int(rows),
+				ColorMode: model.Monochrome,
+				Palette:   palette,
+				Data:      bitmapData,
+			}
+		} else {
+			// Solid color, no border
+			if pos+4 > len(buf) {
+				return lt, fmt.Errorf("buffer too small for color")
+			}
+			lt.DayColor = model.Color{R: buf[pos+2], G: buf[pos+1], B: buf[pos], Alpha: 255}
+			lt.LineWidth = int(buf[pos+3])
+			lt.NightColor = lt.DayColor
+			lt.BorderWidth = 0 // No border
+			pos += 4
+		}
+
+	case 0x07:
+		// Day/night both with transparency, no border
+		if rows > 0 {
+			// Separate day/night patterns with transparency
+			if pos+6 > len(buf) {
+				return lt, fmt.Errorf("buffer too small for day/night pattern colors")
+			}
+			dayPalette := make([]model.Color, 2)
+			dayPalette[1] = model.Color{R: buf[pos+2], G: buf[pos+1], B: buf[pos], Alpha: 255}
+			dayPalette[0] = model.Color{R: 255, G: 255, B: 255, Alpha: 0} // Transparent
+			nightPalette := make([]model.Color, 2)
+			nightPalette[1] = model.Color{R: buf[pos+5], G: buf[pos+4], B: buf[pos+3], Alpha: 255}
+			nightPalette[0] = model.Color{R: 255, G: 255, B: 255, Alpha: 0} // Transparent
+			pos += 6
+
+			bitmapData, bytesRead, err := r.readBitmap(buf, pos, 32, int(rows), 1)
+			if err != nil {
+				return lt, fmt.Errorf("read pattern bitmap: %w", err)
+			}
+			pos += bytesRead
+
+			lt.Pattern = &model.Bitmap{
+				Width:     32,
+				Height:    int(rows),
+				ColorMode: model.Monochrome,
+				Palette:   dayPalette,
+				Data:      bitmapData,
+			}
+			// TODO: Store night palette separately
+		} else {
+			// Separate day/night solid colors, no border
+			if pos+7 > len(buf) {
+				return lt, fmt.Errorf("buffer too small for day/night colors")
+			}
+			lt.DayColor = model.Color{R: buf[pos+2], G: buf[pos+1], B: buf[pos], Alpha: 255}
+			lt.NightColor = model.Color{R: buf[pos+5], G: buf[pos+4], B: buf[pos+3], Alpha: 255}
+			lt.LineWidth = int(buf[pos+6])
+			lt.BorderWidth = 0 // No border
+			pos += 7
+		}
+
+	default:
+		// Unknown color type - skip for now
+		return lt, fmt.Errorf("unsupported polyline color type: 0x%02x", ctyp)
+	}
+
+	// Read labels if present
+	if hasLabels && pos < len(buf) {
+		labels, bytesRead, err := r.readLabels(buf[pos:])
+		if err == nil {
+			lt.Labels = labels
+			pos += bytesRead
+		}
+	}
+
+	// Read text colors if present (same format as points)
+	if hasTextColors && pos < len(buf) {
+		// TODO: Implement text color reading for polylines if needed
+	}
+
+	return lt, nil
+}
+
 // ReadLineTypes reads all line type definitions using the index array
 func (r *Reader) ReadLineTypes(section SectionInfo) ([]model.LineType, error) {
 	if section.ArrayModulo == 0 || (section.ArraySize%uint32(section.ArrayModulo)) != 0 {
@@ -900,7 +1200,7 @@ func (r *Reader) ReadLineTypes(section SectionInfo) ([]model.LineType, error) {
 	for i := 0; i < numEntries; i++ {
 		// Read array entry
 		arrayPos := int64(section.ArrayOffset) + int64(i)*int64(section.ArrayModulo)
-		typCode, _, err := r.readArrayEntry(arrayPos, section.ArrayModulo)
+		typCode, dataOffset, err := r.readArrayEntry(arrayPos, section.ArrayModulo)
 		if err != nil {
 			return nil, fmt.Errorf("read array entry %d: %w", i, err)
 		}
@@ -908,11 +1208,10 @@ func (r *Reader) ReadLineTypes(section SectionInfo) ([]model.LineType, error) {
 		// Decode type/subtype
 		typ, subtyp := r.decodeTypeSubtype(typCode)
 
-		// Read line data (simplified for now - TODO: read actual data using dataOffset)
-		lt := model.LineType{
-			Type:    int(typ),
-			SubType: int(subtyp),
-			Labels:  make(map[string]string),
+		// Read polyline data
+		lt, err := r.readPolylineData(int64(section.DataOffset)+int64(dataOffset), typ, subtyp)
+		if err != nil {
+			return nil, fmt.Errorf("read polyline data at offset 0x%x: %w", section.DataOffset+dataOffset, err)
 		}
 
 		lines = append(lines, lt)
@@ -1019,6 +1318,221 @@ func (r *Reader) readLineType(offset int64) (model.LineType, int, error) {
 	return lt, pos, nil
 }
 
+// readPolygonData reads a single polygon type definition from the data section
+func (r *Reader) readPolygonData(offset int64, typ, subtyp uint32) (model.PolygonType, error) {
+	// Read first byte: flags
+	buf := make([]byte, 4096)
+	n, err := r.r.ReadAt(buf, offset)
+	if err != nil && err != io.EOF {
+		return model.PolygonType{}, err
+	}
+	buf = buf[:n]
+
+	if len(buf) < 1 {
+		return model.PolygonType{}, fmt.Errorf("buffer too small: %d bytes", len(buf))
+	}
+
+	flags := buf[0]
+	ctyp := flags & 0x0F         // Bits 0-3: color type
+	hasLabels := (flags & 0x10) != 0
+	hasTextColors := (flags & 0x20) != 0
+
+	poly := model.PolygonType{
+		Type:    int(typ),
+		SubType: int(subtyp),
+		Labels:  make(map[string]string),
+	}
+
+	pos := 1
+
+	// Read color/pattern data based on ctyp
+	// All polygon patterns are 32×32, 1 bpp
+	switch ctyp {
+	case 0x01:
+		// Day & night with different fill colors + border
+		if pos+12 > len(buf) {
+			return poly, fmt.Errorf("buffer too small for colors")
+		}
+		poly.DayColor = model.Color{R: buf[pos+2], G: buf[pos+1], B: buf[pos], Alpha: 255}
+		poly.NightColor = model.Color{R: buf[pos+5], G: buf[pos+4], B: buf[pos+3], Alpha: 255}
+		// Border colors (pen)
+		_ = model.Color{R: buf[pos+8], G: buf[pos+7], B: buf[pos+6], Alpha: 255}  // Day border
+		_ = model.Color{R: buf[pos+11], G: buf[pos+10], B: buf[pos+9], Alpha: 255} // Night border
+		pos += 12
+
+	case 0x06:
+		// Same fill for day/night, no border
+		if pos+3 > len(buf) {
+			return poly, fmt.Errorf("buffer too small for color")
+		}
+		color := model.Color{R: buf[pos+2], G: buf[pos+1], B: buf[pos], Alpha: 255}
+		poly.DayColor = color
+		poly.NightColor = color
+		pos += 3
+
+	case 0x07:
+		// Different fill for day/night, no border
+		if pos+6 > len(buf) {
+			return poly, fmt.Errorf("buffer too small for day/night colors")
+		}
+		poly.DayColor = model.Color{R: buf[pos+2], G: buf[pos+1], B: buf[pos], Alpha: 255}
+		poly.NightColor = model.Color{R: buf[pos+5], G: buf[pos+4], B: buf[pos+3], Alpha: 255}
+		pos += 6
+
+	case 0x08:
+		// Day & night same pattern (2 colors)
+		if pos+6 > len(buf) {
+			return poly, fmt.Errorf("buffer too small for pattern colors")
+		}
+		palette := make([]model.Color, 2)
+		palette[1] = model.Color{R: buf[pos+2], G: buf[pos+1], B: buf[pos], Alpha: 255}
+		palette[0] = model.Color{R: buf[pos+5], G: buf[pos+4], B: buf[pos+3], Alpha: 255}
+		pos += 6
+
+		// Read 32×32 pattern
+		bitmapData, bytesRead, err := r.readBitmap(buf, pos, 32, 32, 1)
+		if err != nil {
+			return poly, fmt.Errorf("read pattern: %w", err)
+		}
+		pos += bytesRead
+
+		poly.Pattern = &model.Bitmap{
+			Width:     32,
+			Height:    32,
+			ColorMode: model.Monochrome,
+			Palette:   palette,
+			Data:      bitmapData,
+		}
+
+	case 0x09:
+		// Day & night different patterns (4 colors total)
+		if pos+12 > len(buf) {
+			return poly, fmt.Errorf("buffer too small for day/night pattern colors")
+		}
+		dayPalette := make([]model.Color, 2)
+		dayPalette[1] = model.Color{R: buf[pos+2], G: buf[pos+1], B: buf[pos], Alpha: 255}
+		dayPalette[0] = model.Color{R: buf[pos+5], G: buf[pos+4], B: buf[pos+3], Alpha: 255}
+		nightPalette := make([]model.Color, 2)
+		nightPalette[1] = model.Color{R: buf[pos+8], G: buf[pos+7], B: buf[pos+6], Alpha: 255}
+		nightPalette[0] = model.Color{R: buf[pos+11], G: buf[pos+10], B: buf[pos+9], Alpha: 255}
+		pos += 12
+
+		// Read pattern (same bitmap data for both, different palettes)
+		bitmapData, bytesRead, err := r.readBitmap(buf, pos, 32, 32, 1)
+		if err != nil {
+			return poly, fmt.Errorf("read pattern: %w", err)
+		}
+		pos += bytesRead
+
+		poly.Pattern = &model.Bitmap{
+			Width:     32,
+			Height:    32,
+			ColorMode: model.Monochrome,
+			Palette:   dayPalette, // Use day palette
+			Data:      bitmapData,
+		}
+		// TODO: Store night palette separately
+
+	case 0x0B:
+		// Day with transparency + night 2-color
+		if pos+9 > len(buf) {
+			return poly, fmt.Errorf("buffer too small for pattern colors")
+		}
+		dayPalette := make([]model.Color, 2)
+		dayPalette[1] = model.Color{R: buf[pos+2], G: buf[pos+1], B: buf[pos], Alpha: 255}
+		dayPalette[0] = model.Color{R: 255, G: 255, B: 255, Alpha: 0} // Transparent
+		nightPalette := make([]model.Color, 2)
+		nightPalette[1] = model.Color{R: buf[pos+5], G: buf[pos+4], B: buf[pos+3], Alpha: 255}
+		nightPalette[0] = model.Color{R: buf[pos+8], G: buf[pos+7], B: buf[pos+6], Alpha: 255}
+		pos += 9
+
+		bitmapData, bytesRead, err := r.readBitmap(buf, pos, 32, 32, 1)
+		if err != nil {
+			return poly, fmt.Errorf("read pattern: %w", err)
+		}
+		pos += bytesRead
+
+		poly.Pattern = &model.Bitmap{
+			Width:     32,
+			Height:    32,
+			ColorMode: model.Monochrome,
+			Palette:   dayPalette,
+			Data:      bitmapData,
+		}
+
+	case 0x0D:
+		// Day 2-color + night with transparency
+		if pos+9 > len(buf) {
+			return poly, fmt.Errorf("buffer too small for pattern colors")
+		}
+		dayPalette := make([]model.Color, 2)
+		dayPalette[1] = model.Color{R: buf[pos+2], G: buf[pos+1], B: buf[pos], Alpha: 255}
+		dayPalette[0] = model.Color{R: buf[pos+5], G: buf[pos+4], B: buf[pos+3], Alpha: 255}
+		nightPalette := make([]model.Color, 2)
+		nightPalette[1] = model.Color{R: buf[pos+8], G: buf[pos+7], B: buf[pos+6], Alpha: 255}
+		nightPalette[0] = model.Color{R: 255, G: 255, B: 255, Alpha: 0} // Transparent
+		pos += 9
+
+		bitmapData, bytesRead, err := r.readBitmap(buf, pos, 32, 32, 1)
+		if err != nil {
+			return poly, fmt.Errorf("read pattern: %w", err)
+		}
+		pos += bytesRead
+
+		poly.Pattern = &model.Bitmap{
+			Width:     32,
+			Height:    32,
+			ColorMode: model.Monochrome,
+			Palette:   dayPalette,
+			Data:      bitmapData,
+		}
+
+	case 0x0E:
+		// Day & night same with transparency
+		if pos+3 > len(buf) {
+			return poly, fmt.Errorf("buffer too small for pattern color")
+		}
+		palette := make([]model.Color, 2)
+		palette[1] = model.Color{R: buf[pos+2], G: buf[pos+1], B: buf[pos], Alpha: 255}
+		palette[0] = model.Color{R: 255, G: 255, B: 255, Alpha: 0} // Transparent
+		pos += 3
+
+		bitmapData, bytesRead, err := r.readBitmap(buf, pos, 32, 32, 1)
+		if err != nil {
+			return poly, fmt.Errorf("read pattern: %w", err)
+		}
+		pos += bytesRead
+
+		poly.Pattern = &model.Bitmap{
+			Width:     32,
+			Height:    32,
+			ColorMode: model.Monochrome,
+			Palette:   palette,
+			Data:      bitmapData,
+		}
+
+	default:
+		// Unknown color type
+		return poly, fmt.Errorf("unsupported polygon color type: 0x%02x", ctyp)
+	}
+
+	// Read labels if present
+	if hasLabels && pos < len(buf) {
+		labels, bytesRead, err := r.readLabels(buf[pos:])
+		if err == nil {
+			poly.Labels = labels
+			pos += bytesRead
+		}
+	}
+
+	// Read text colors if present
+	if hasTextColors && pos < len(buf) {
+		// TODO: Implement text color reading for polygons if needed
+	}
+
+	return poly, nil
+}
+
 // ReadPolygonTypes reads all polygon type definitions using the index array
 func (r *Reader) ReadPolygonTypes(section SectionInfo) ([]model.PolygonType, error) {
 	if section.ArrayModulo == 0 || (section.ArraySize%uint32(section.ArrayModulo)) != 0 {
@@ -1031,7 +1545,7 @@ func (r *Reader) ReadPolygonTypes(section SectionInfo) ([]model.PolygonType, err
 	for i := 0; i < numEntries; i++ {
 		// Read array entry
 		arrayPos := int64(section.ArrayOffset) + int64(i)*int64(section.ArrayModulo)
-		typCode, _, err := r.readArrayEntry(arrayPos, section.ArrayModulo)
+		typCode, dataOffset, err := r.readArrayEntry(arrayPos, section.ArrayModulo)
 		if err != nil {
 			return nil, fmt.Errorf("read array entry %d: %w", i, err)
 		}
@@ -1039,11 +1553,10 @@ func (r *Reader) ReadPolygonTypes(section SectionInfo) ([]model.PolygonType, err
 		// Decode type/subtype
 		typ, subtyp := r.decodeTypeSubtype(typCode)
 
-		// Read polygon data (simplified for now - TODO: read actual data using dataOffset)
-		poly := model.PolygonType{
-			Type:    int(typ),
-			SubType: int(subtyp),
-			Labels:  make(map[string]string),
+		// Read polygon data
+		poly, err := r.readPolygonData(int64(section.DataOffset)+int64(dataOffset), typ, subtyp)
+		if err != nil {
+			return nil, fmt.Errorf("read polygon data at offset 0x%x: %w", section.DataOffset+dataOffset, err)
 		}
 
 		polygons = append(polygons, poly)

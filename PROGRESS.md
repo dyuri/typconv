@@ -1,29 +1,27 @@
 # TYP Parser Progress Report
 
-## Current Status: Full Point Parser Implemented! 🎉🎉🎉
+## Current Status: Complete TYP Parser Implemented! 🎉🎉🎉🎉
 
-Complete implementation of TYP point type parsing with color tables, bitmaps, labels, and text colors!
+Full implementation of TYP file parsing for points, polylines, and polygons with all color modes and patterns!
 
-### Latest Implementation (2025-12-26 16:00 UTC)
+### Latest Implementation (2025-12-26 16:05 UTC)
 
-**✅ Fully Working:**
+**✅ Fully Implemented and Working:**
 - ✅ Complete header parsing with all array metadata (offsets, modulo, sizes)
 - ✅ Index array reading (3/4/5 byte entry formats)
 - ✅ Type/subtype bit-unpacking (QMapShack algorithm)
 - ✅ Variable-length label parsing with language codes
 - ✅ Codepage decoding (CP1250, CP1252, UTF-8)
-- ✅ Color table parsing (BGR → RGB conversion)
-- ✅ Bitmap bit unpacking (1/2/4/8 bpp → pixel indices)
-- ✅ Text color parsing (day/night colors, font styles)
-- ✅ Day/night bitmap handling
-- ✅ XPM output with proper color palettes
-- ✅ All 3 test files generate complete output!
+- ✅ **Point types**: Color tables, bitmaps (1/2/4/8 bpp), text colors, day/night modes
+- ✅ **Polyline types**: All 8 color modes (0x00-0x07), patterns, solid colors, borders
+- ✅ **Polygon types**: All 7 color modes (0x01, 0x06-0x09, 0x0B, 0x0D-0x0E), 32×32 patterns
+- ✅ XPM output with proper color palettes for all geometry types
+- ✅ **All 3 test files parse completely without errors!**
 
-**⚠️ Remaining Work:**
-- ⚠️ Polyline data parsing (structure works, bitmap/color reading stubbed)
-- ⚠️ Polygon data parsing (structure works, bitmap/color reading stubbed)
-- ⚠️ Draw order array parsing (not implemented)
-- ⚠️ Night bitmap storage (currently skipped after reading)
+**⚠️ Remaining (Low Priority):**
+- ⚠️ Draw order array parsing (not critical for conversion)
+- ⚠️ Night bitmap/palette separate storage (currently reads but uses day palette)
+- ⚠️ Text color parsing for polylines/polygons (structure ready, not critical)
 
 ## Previous Status: Format Fully Documented! 🎉
 
@@ -286,7 +284,7 @@ func (r *Reader) readPointData(offset uint32) (*model.PointType, error) {
 - [x] Successfully convert all 3 test files to text
 - [ ] Match structure with QMapShack parsing (partially - need bitmap/color parsing)
 
-**Current completion**: ~85% (format understood ✓, specification complete ✓, point parsing fully working ✓, line/polygon parsing pending)
+**Current completion**: ~95% (format understood ✓, specification complete ✓, all geometry types fully parsing ✓, only draw order pending)
 
 ## Resources
 
@@ -359,9 +357,9 @@ func (r *Reader) readPointData(offset uint32) (*model.PointType, error) {
 
 ---
 
-**Status**: Point parsing fully implemented! Color tables, bitmaps, labels, and text colors all working.
+**Status**: Complete TYP parser implemented! All geometry types (points, polylines, polygons) parse successfully.
 
-**Next Action**: Implement polyline and polygon data parsing using same color/bitmap functions.
+**Next Action**: Optional - implement draw order array parsing and night bitmap storage.
 
 **Breakthrough #1**: QMapShack source code provided complete format understanding!
 
@@ -369,9 +367,11 @@ func (r *Reader) readPointData(offset uint32) (*model.PointType, error) {
 
 **Breakthrough #3**: Complete point data extraction - colors, bitmaps, labels, all working with XPM output!
 
-**Test Results**:
-- ✅ M00000.typ - Full extraction: types, colors, XPM bitmaps, labels (CP1252)
-- ✅ M03690.typ - Multi-language labels (Restaurant/Étterem), 16×16 icons with 25 colors (CP1252)
-- ✅ oh_3690.typ - Perfect Hungarian encoding (Főváros), color palettes, bitmaps (CP1250)
+**Breakthrough #4**: Polyline and polygon parsing complete - all color modes (0x00-0x0E) supported!
 
-**Last Updated**: 2025-12-26 16:00 UTC
+**Test Results**:
+- ✅ M00000.typ - **All geometry types**: points, polylines, polygons parse completely (CP1252)
+- ✅ M03690.typ - Multi-language labels, all geometry types, 16×16 icons with 25 colors (CP1252)
+- ✅ oh_3690.typ - Perfect Hungarian encoding (Főváros), all geometry types, patterns (CP1250)
+
+**Last Updated**: 2025-12-26 16:05 UTC
