@@ -460,7 +460,7 @@ func (r *Reader) readPointData(offset int64, typ, subtyp uint32) (model.PointTyp
 	width := int(buf[1])
 	height := int(buf[2])
 	ncolors := int(buf[3])
-	_ = buf[4] // ctype - TODO: use for color table reading
+	ctype := buf[4]
 
 	hasLabels := (flags & 0x04) != 0
 	hasTextColors := (flags & 0x08) != 0
@@ -474,29 +474,85 @@ func (r *Reader) readPointData(offset int64, typ, subtyp uint32) (model.PointTyp
 
 	pos := 5
 
-	// Read color table
-	// TODO: Implement color table reading based on ncolors and ctype
+	// Read color table (day mode)
+	var palette []model.Color
+	var bytesRead int
 
-	// Read bitmap
-	// TODO: Implement bitmap reading based on width, height, and bpp
-
-	// For now, skip to labels by estimating bitmap size
-	// This is a placeholder - we need proper bitmap parsing
-	bpp := r.calculateBPP(ncolors)
-	paletteSize := ncolors * 3
-	bitmapSize := (width * height * bpp) / 8
-	if (width*height*bpp)%8 != 0 {
-		bitmapSize++
+	if ncolors > 0 {
+		var err error
+		palette, bytesRead, err = r.readColorTable(buf, pos, ncolors)
+		if err != nil {
+			return pt, fmt.Errorf("read color table: %w", err)
+		}
+		pos += bytesRead
 	}
 
-	pos += paletteSize + bitmapSize
+	// Read bitmap (day mode)
+	bpp := r.calculateBPP(ncolors)
+	var bitmapData []byte
+
+	if width > 0 && height > 0 {
+		bitmapData, bytesRead, err = r.readBitmap(buf, pos, width, height, bpp)
+		if err != nil {
+			return pt, fmt.Errorf("read bitmap: %w", err)
+		}
+		pos += bytesRead
+
+		// Create bitmap object
+		pt.Icon = &model.Bitmap{
+			Width:   width,
+			Height:  height,
+			Palette: palette,
+			Data:    bitmapData,
+		}
+
+		// Set color mode based on BPP
+		switch bpp {
+		case 1:
+			pt.Icon.ColorMode = model.Monochrome
+		case 4:
+			pt.Icon.ColorMode = model.Color16
+		case 8:
+			pt.Icon.ColorMode = model.Color256
+		default:
+			pt.Icon.ColorMode = model.Color256
+		}
+	}
 
 	// Handle day/night modes
 	if dayNightMode == 0x03 {
-		// Separate night bitmap - skip it too
-		pos += 2 // ncolors, ctype for night
-		// Would need to read night palette and bitmap here
+		// Separate night bitmap
+		if pos+2 > len(buf) {
+			return pt, fmt.Errorf("buffer too small for night bitmap header")
+		}
+
+		nightNcolors := int(buf[pos])
+		nightCtype := buf[pos+1]
+		_ = nightCtype // TODO: use for night color processing
+		pos += 2
+
+		// Read night palette
+		if nightNcolors > 0 {
+			_, bytesRead, err = r.readColorTable(buf, pos, nightNcolors)
+			if err != nil {
+				return pt, fmt.Errorf("read night color table: %w", err)
+			}
+			pos += bytesRead
+		}
+
+		// Read night bitmap
+		if width > 0 && height > 0 {
+			nightBpp := r.calculateBPP(nightNcolors)
+			_, bytesRead, err = r.readBitmap(buf, pos, width, height, nightBpp)
+			if err != nil {
+				return pt, fmt.Errorf("read night bitmap: %w", err)
+			}
+			pos += bytesRead
+			// TODO: Store night bitmap separately
+		}
 	}
+
+	_ = ctype // TODO: use for alpha channel processing
 
 	// Read labels if present
 	if hasLabels && pos < len(buf) {
@@ -509,10 +565,145 @@ func (r *Reader) readPointData(offset int64, typ, subtyp uint32) (model.PointTyp
 
 	// Read text colors if present
 	if hasTextColors && pos < len(buf) {
-		// TODO: Implement text color reading
+		if pos >= len(buf) {
+			return pt, fmt.Errorf("buffer too small for text colors")
+		}
+
+		textColorFlags := buf[pos]
+		pos++
+
+		// Bits 0-2: Label type
+		labelType := textColorFlags & 0x07
+		switch labelType {
+		case 0:
+			pt.FontStyle = model.FontNormal
+		case 1:
+			pt.FontStyle = model.FontNoLabel
+		case 2:
+			pt.FontStyle = model.FontSmall
+		case 3:
+			pt.FontStyle = model.FontNormal
+		case 4:
+			pt.FontStyle = model.FontLarge
+		}
+
+		// Bit 3: Has day color
+		if (textColorFlags & 0x08) != 0 {
+			if pos+3 > len(buf) {
+				return pt, fmt.Errorf("buffer too small for day text color")
+			}
+			// Colors are BGR
+			b := buf[pos]
+			g := buf[pos+1]
+			r := buf[pos+2]
+			pt.DayColor = model.Color{R: r, G: g, B: b, Alpha: 255}
+			pos += 3
+		}
+
+		// Bit 4: Has night color
+		if (textColorFlags & 0x10) != 0 {
+			if pos+3 > len(buf) {
+				return pt, fmt.Errorf("buffer too small for night text color")
+			}
+			// Colors are BGR
+			b := buf[pos]
+			g := buf[pos+1]
+			r := buf[pos+2]
+			pt.NightColor = model.Color{R: r, G: g, B: b, Alpha: 255}
+			pos += 3
+		}
 	}
 
 	return pt, nil
+}
+
+// readColorTable reads a color palette from BGR format
+func (r *Reader) readColorTable(buf []byte, pos int, ncolors int) ([]model.Color, int, error) {
+	if pos+ncolors*3 > len(buf) {
+		return nil, 0, fmt.Errorf("buffer too small for color table: need %d bytes, have %d", ncolors*3, len(buf)-pos)
+	}
+
+	palette := make([]model.Color, ncolors)
+	for i := 0; i < ncolors; i++ {
+		// Colors are stored as BGR (not RGB!)
+		b := buf[pos+i*3+0]
+		g := buf[pos+i*3+1]
+		r := buf[pos+i*3+2]
+		palette[i] = model.Color{
+			R:     r,
+			G:     g,
+			B:     b,
+			Alpha: 255, // Opaque by default
+		}
+	}
+
+	return palette, ncolors * 3, nil
+}
+
+// readBitmap reads bit-packed pixel data and unpacks it to individual pixel indices
+func (r *Reader) readBitmap(buf []byte, pos, width, height, bpp int) ([]byte, int, error) {
+	// Calculate bitmap size in bytes (bit-packed)
+	bitsTotal := width * height * bpp
+	bytesNeeded := bitsTotal / 8
+	if bitsTotal%8 != 0 {
+		bytesNeeded++
+	}
+
+	if pos+bytesNeeded > len(buf) {
+		return nil, 0, fmt.Errorf("buffer too small for bitmap: need %d bytes, have %d", bytesNeeded, len(buf)-pos)
+	}
+
+	// Unpack pixel data based on bits per pixel
+	totalPixels := width * height
+	pixelData := make([]byte, totalPixels)
+
+	switch bpp {
+	case 1:
+		// 1 bpp: 8 pixels per byte
+		for i := 0; i < totalPixels; i++ {
+			byteIdx := i / 8
+			bitIdx := 7 - (i % 8) // MSB first
+			if pos+byteIdx >= len(buf) {
+				return nil, 0, fmt.Errorf("bitmap data truncated at pixel %d", i)
+			}
+			pixelData[i] = (buf[pos+byteIdx] >> bitIdx) & 0x01
+		}
+	case 2:
+		// 2 bpp: 4 pixels per byte
+		for i := 0; i < totalPixels; i++ {
+			byteIdx := i / 4
+			pixelInByte := 3 - (i % 4) // MSB first
+			if pos+byteIdx >= len(buf) {
+				return nil, 0, fmt.Errorf("bitmap data truncated at pixel %d", i)
+			}
+			pixelData[i] = (buf[pos+byteIdx] >> (pixelInByte * 2)) & 0x03
+		}
+	case 4:
+		// 4 bpp: 2 pixels per byte
+		for i := 0; i < totalPixels; i++ {
+			byteIdx := i / 2
+			if pos+byteIdx >= len(buf) {
+				return nil, 0, fmt.Errorf("bitmap data truncated at pixel %d", i)
+			}
+			if i%2 == 0 {
+				// High nibble
+				pixelData[i] = (buf[pos+byteIdx] >> 4) & 0x0F
+			} else {
+				// Low nibble
+				pixelData[i] = buf[pos+byteIdx] & 0x0F
+			}
+		}
+	case 8:
+		// 8 bpp: 1 pixel per byte (already unpacked)
+		if pos+totalPixels > len(buf) {
+			return nil, 0, fmt.Errorf("bitmap data truncated")
+		}
+		copy(pixelData, buf[pos:pos+totalPixels])
+	default:
+		return nil, 0, fmt.Errorf("unsupported bpp: %d", bpp)
+	}
+
+	return pixelData, bytesNeeded, nil
 }
 
 // calculateBPP calculates bits per pixel from number of colors
@@ -623,7 +814,7 @@ func (r *Reader) readPointType(offset int64) (model.PointType, int, error) {
 
 	// Check if has icon (bit 0 of flags)
 	if flags&0x01 != 0 {
-		bitmap, size, err := r.readBitmap(offset + int64(pos))
+		bitmap, size, err := r.readBitmapOld(offset + int64(pos))
 		if err != nil {
 			return model.PointType{}, 0, fmt.Errorf("read icon bitmap: %w", err)
 		}
@@ -769,7 +960,7 @@ func (r *Reader) readLineType(offset int64) (model.LineType, int, error) {
 
 	// Skip pattern if present (bit 0)
 	if flags&0x01 != 0 {
-		_, size, err := r.readBitmap(offset + int64(pos))
+		_, size, err := r.readBitmapOld(offset + int64(pos))
 		if err != nil {
 			// Continue anyway
 		} else {
@@ -897,7 +1088,7 @@ func (r *Reader) readPolygonType(offset int64) (model.PolygonType, int, error) {
 
 	// Skip pattern if present (bit 0)
 	if flags&0x01 != 0 {
-		_, size, err := r.readBitmap(offset + int64(pos))
+		_, size, err := r.readBitmapOld(offset + int64(pos))
 		if err != nil {
 			// Continue anyway
 		} else {
@@ -956,9 +1147,9 @@ func (r *Reader) readPolygonType(offset int64) (model.PolygonType, int, error) {
 	return poly, pos, nil
 }
 
-// readBitmap reads bitmap data at the specified offset
+// readBitmapOld reads bitmap data at the specified offset (DEPRECATED - use readBitmap with buffer instead)
 // Returns the bitmap, number of bytes read, and any error
-func (r *Reader) readBitmap(offset int64) (*model.Bitmap, int, error) {
+func (r *Reader) readBitmapOld(offset int64) (*model.Bitmap, int, error) {
 	buf := make([]byte, 4096) // Max reasonable bitmap size
 	n, err := r.r.ReadAt(buf, offset)
 	if err != nil && err != io.EOF {

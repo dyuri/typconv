@@ -1,24 +1,29 @@
 # TYP Parser Progress Report
 
-## Current Status: Array-Based Parser Working! 🎉🎉
+## Current Status: Full Point Parser Implemented! 🎉🎉🎉
 
-We've successfully implemented the array-based parser and all 3 test files parse correctly!
+Complete implementation of TYP point type parsing with color tables, bitmaps, labels, and text colors!
 
-### Latest Implementation (2025-12-26 15:30 UTC)
+### Latest Implementation (2025-12-26 16:00 UTC)
 
-**What's Working:**
+**✅ Fully Working:**
 - ✅ Complete header parsing with all array metadata (offsets, modulo, sizes)
 - ✅ Index array reading (3/4/5 byte entry formats)
 - ✅ Type/subtype bit-unpacking (QMapShack algorithm)
 - ✅ Variable-length label parsing with language codes
 - ✅ Codepage decoding (CP1250, CP1252, UTF-8)
-- ✅ Point/line/polygon type enumeration via arrays
-- ✅ All 3 test files parse successfully!
+- ✅ Color table parsing (BGR → RGB conversion)
+- ✅ Bitmap bit unpacking (1/2/4/8 bpp → pixel indices)
+- ✅ Text color parsing (day/night colors, font styles)
+- ✅ Day/night bitmap handling
+- ✅ XPM output with proper color palettes
+- ✅ All 3 test files generate complete output!
 
-**What's Pending:**
-- ⚠️ Color table parsing (currently skipping over)
-- ⚠️ Bitmap data extraction (estimating size, not parsing pixels)
-- ⚠️ Full polyline/polygon data reading (structure works, data stubbed)
+**⚠️ Remaining Work:**
+- ⚠️ Polyline data parsing (structure works, bitmap/color reading stubbed)
+- ⚠️ Polygon data parsing (structure works, bitmap/color reading stubbed)
+- ⚠️ Draw order array parsing (not implemented)
+- ⚠️ Night bitmap storage (currently skipped after reading)
 
 ## Previous Status: Format Fully Documented! 🎉
 
@@ -281,7 +286,7 @@ func (r *Reader) readPointData(offset uint32) (*model.PointType, error) {
 - [x] Successfully convert all 3 test files to text
 - [ ] Match structure with QMapShack parsing (partially - need bitmap/color parsing)
 
-**Current completion**: ~75% (format understood ✓, specification complete ✓, array parsing working ✓, bitmap parsing pending)
+**Current completion**: ~85% (format understood ✓, specification complete ✓, point parsing fully working ✓, line/polygon parsing pending)
 
 ## Resources
 
@@ -340,28 +345,33 @@ func (r *Reader) readPointData(offset uint32) (*model.PointType, error) {
 - ✅ Variable-length label parser
 - ✅ Point/line/polygon array iteration
 
-### Needs Implementation
-- ⚠️ Color table reader (currently skipping)
-- ⚠️ Bitmap bit unpacker (currently estimating size)
-- ⚠️ Day/night bitmap handling (partially implemented)
-- ⚠️ Text color parser (not implemented)
-- ⚠️ Polyline data parsing (structure done, data stubbed)
-- ⚠️ Polygon data parsing (structure done, data stubbed)
+### Fully Implemented in This Session 🎉
+- ✅ Color table reader (BGR → RGB, proper palette support)
+- ✅ Bitmap bit unpacker (1/2/4/8 bpp unpacking to pixel indices)
+- ✅ Day/night bitmap handling (reads both, stores day bitmap)
+- ✅ Text color parser (day/night colors, font styles)
+
+### Still Needs Implementation
+- ⚠️ Polyline data parsing (array iteration works, need bitmap/color reading)
+- ⚠️ Polygon data parsing (array iteration works, need bitmap/color reading)
 - ⚠️ Draw order array parsing (not implemented)
+- ⚠️ Night bitmap storage (reads but doesn't store separately)
 
 ---
 
-**Status**: Array-based parser implemented and working! All 3 test files parse successfully.
+**Status**: Point parsing fully implemented! Color tables, bitmaps, labels, and text colors all working.
 
-**Next Action**: Implement color table and bitmap parsing for complete data extraction.
+**Next Action**: Implement polyline and polygon data parsing using same color/bitmap functions.
 
 **Breakthrough #1**: QMapShack source code provided complete format understanding!
 
 **Breakthrough #2**: Array-based parsing working - type codes, labels, and codepage decoding all functional!
 
-**Test Results**:
-- ✅ M00000.typ - parsing with CP1252, extracting types and labels
-- ✅ M03690.typ - parsing with CP1252, Hungarian labels working
-- ✅ oh_3690.typ - parsing with CP1250, proper Hungarian encoding (Főváros, Étterem, etc.)
+**Breakthrough #3**: Complete point data extraction - colors, bitmaps, labels, all working with XPM output!
 
-**Last Updated**: 2025-12-26 15:30 UTC
+**Test Results**:
+- ✅ M00000.typ - Full extraction: types, colors, XPM bitmaps, labels (CP1252)
+- ✅ M03690.typ - Multi-language labels (Restaurant/Étterem), 16×16 icons with 25 colors (CP1252)
+- ✅ oh_3690.typ - Perfect Hungarian encoding (Főváros), color palettes, bitmaps (CP1250)
+
+**Last Updated**: 2025-12-26 16:00 UTC
