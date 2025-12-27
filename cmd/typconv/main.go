@@ -113,8 +113,7 @@ func runBin2Txt(cmd *cobra.Command, args []string) error {
 	case "mkgmap":
 		return typconv.WriteTextTYP(output, typ)
 	case "json":
-		// TODO: Implement JSON output
-		return fmt.Errorf("JSON format not yet implemented")
+		return writeJSONTYP(output, typ)
 	default:
 		return fmt.Errorf("unknown format: %s", format)
 	}
@@ -145,6 +144,166 @@ func stripLabels(typ *model.TYPFile) {
 	for i := range typ.Polygons {
 		typ.Polygons[i].Labels = make(map[string]string)
 	}
+}
+
+func writeJSONTYP(w *os.File, typ *model.TYPFile) error {
+	// Create JSON-friendly structure
+	output := map[string]interface{}{
+		"header": map[string]interface{}{
+			"fid":      typ.Header.FID,
+			"pid":      typ.Header.PID,
+			"codepage": typ.Header.CodePage,
+		},
+		"points":   convertPointsToJSON(typ.Points),
+		"lines":    convertLinesToJSON(typ.Lines),
+		"polygons": convertPolygonsToJSON(typ.Polygons),
+	}
+
+	encoder := json.NewEncoder(w)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(output)
+}
+
+func convertPointsToJSON(points []model.PointType) []map[string]interface{} {
+	result := make([]map[string]interface{}, len(points))
+	for i, pt := range points {
+		entry := map[string]interface{}{
+			"type":    pt.Type,
+			"subtype": pt.SubType,
+		}
+
+		// Add colors
+		if pt.DayColor != (model.Color{}) {
+			entry["dayColor"] = colorToHex(pt.DayColor)
+		}
+		if pt.NightColor != (model.Color{}) {
+			entry["nightColor"] = colorToHex(pt.NightColor)
+		}
+
+		// Add labels
+		if len(pt.Labels) > 0 {
+			entry["labels"] = pt.Labels
+		}
+
+		// Add bitmaps
+		if pt.DayIcon != nil {
+			entry["dayIcon"] = bitmapToJSON(pt.DayIcon)
+		}
+		if pt.NightIcon != nil {
+			entry["nightIcon"] = bitmapToJSON(pt.NightIcon)
+		}
+
+		result[i] = entry
+	}
+	return result
+}
+
+func convertLinesToJSON(lines []model.LineType) []map[string]interface{} {
+	result := make([]map[string]interface{}, len(lines))
+	for i, lt := range lines {
+		entry := map[string]interface{}{
+			"type":    lt.Type,
+			"subtype": lt.SubType,
+		}
+
+		// Add colors
+		if lt.DayColor != (model.Color{}) {
+			entry["dayColor"] = colorToHex(lt.DayColor)
+		}
+		if lt.NightColor != (model.Color{}) {
+			entry["nightColor"] = colorToHex(lt.NightColor)
+		}
+		if lt.DayBorderColor != (model.Color{}) {
+			entry["dayBorderColor"] = colorToHex(lt.DayBorderColor)
+		}
+		if lt.NightBorderColor != (model.Color{}) {
+			entry["nightBorderColor"] = colorToHex(lt.NightBorderColor)
+		}
+
+		// Add width
+		if lt.LineWidth > 0 {
+			entry["lineWidth"] = lt.LineWidth
+		}
+		if lt.BorderWidth > 0 {
+			entry["borderWidth"] = lt.BorderWidth
+		}
+
+		// Add labels
+		if len(lt.Labels) > 0 {
+			entry["labels"] = lt.Labels
+		}
+
+		// Add patterns
+		if lt.DayPattern != nil {
+			entry["dayPattern"] = bitmapToJSON(lt.DayPattern)
+		}
+		if lt.NightPattern != nil {
+			entry["nightPattern"] = bitmapToJSON(lt.NightPattern)
+		}
+
+		result[i] = entry
+	}
+	return result
+}
+
+func convertPolygonsToJSON(polygons []model.PolygonType) []map[string]interface{} {
+	result := make([]map[string]interface{}, len(polygons))
+	for i, poly := range polygons {
+		entry := map[string]interface{}{
+			"type":    poly.Type,
+			"subtype": poly.SubType,
+		}
+
+		// Add colors
+		if poly.DayColor != (model.Color{}) {
+			entry["dayColor"] = colorToHex(poly.DayColor)
+		}
+		if poly.NightColor != (model.Color{}) {
+			entry["nightColor"] = colorToHex(poly.NightColor)
+		}
+
+		// Add labels
+		if len(poly.Labels) > 0 {
+			entry["labels"] = poly.Labels
+		}
+
+		// Add patterns
+		if poly.DayPattern != nil {
+			entry["dayPattern"] = bitmapToJSON(poly.DayPattern)
+		}
+		if poly.NightPattern != nil {
+			entry["nightPattern"] = bitmapToJSON(poly.NightPattern)
+		}
+
+		result[i] = entry
+	}
+	return result
+}
+
+func bitmapToJSON(bm *model.Bitmap) map[string]interface{} {
+	result := map[string]interface{}{
+		"width":  bm.Width,
+		"height": bm.Height,
+	}
+
+	// Add palette
+	if len(bm.Palette) > 0 {
+		palette := make([]string, len(bm.Palette))
+		for i, c := range bm.Palette {
+			palette[i] = colorToHex(c)
+		}
+		result["palette"] = palette
+		result["colors"] = len(bm.Palette)
+	}
+
+	// Add pixel data as array of color indices
+	result["pixels"] = bm.Data
+
+	return result
+}
+
+func colorToHex(c model.Color) string {
+	return fmt.Sprintf("#%02x%02x%02x", c.R, c.G, c.B)
 }
 
 // txt2bin command
