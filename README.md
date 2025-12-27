@@ -9,6 +9,7 @@ Native Linux tool for converting Garmin TYP (custom map type) files between bina
 
 - ✅ **Binary TYP → Text**: Convert binary TYP files to mkgmap-compatible text format
 - ✅ **Text → Binary TYP**: Create binary TYP files from text definitions
+- ✅ **Extract from .img**: Extract TYP files from Garmin .img container files
 - ✅ **Round-trip Conversion**: Full bidirectional conversion with data preservation
 - ✅ **Character Encoding**: Automatic CodePage detection and support for all Windows codepages
 - ✅ **No Wine required**: Pure Go implementation, works natively on Linux
@@ -47,6 +48,9 @@ go install github.com/dyuri/typconv/cmd/typconv@latest
 # Convert a binary TYP file to text format
 typconv bin2txt map.typ -o map.txt
 
+# Convert to JSON format
+typconv bin2txt map.typ --format json -o map.json
+
 # Convert and display to stdout
 typconv bin2txt map.typ
 ```
@@ -63,6 +67,42 @@ typconv txt2bin custom.txt -o custom.typ --fid 3511 --pid 1
 
 # Override CodePage (only if you need to force a specific encoding)
 typconv txt2bin custom.txt -o custom.typ --codepage 1250
+```
+
+### Display File Information
+
+```bash
+# Show detailed file information
+typconv info map.typ
+
+# Brief one-line summary (great for batch processing)
+typconv info map.typ --brief
+
+# JSON output for scripting
+typconv info map.typ --json
+```
+
+### Validate Files
+
+```bash
+# Validate TYP file structure
+typconv validate map.typ
+
+# Strict validation (fail on warnings, useful for CI/CD)
+typconv validate map.typ --strict
+```
+
+### Extract from IMG Files
+
+```bash
+# List TYP files in a Garmin IMG container
+typconv extract gmapsupp.img --list
+
+# Extract first TYP file to a directory
+typconv extract gmapsupp.img -o output_dir
+
+# Extract all TYP files (if multiple exist)
+typconv extract gmapsupp.img -o output_dir --all
 ```
 
 ### Round-Trip Conversion
@@ -86,6 +126,9 @@ typconv [command] [flags] [arguments]
 Available Commands:
   bin2txt      Convert binary TYP to text format
   txt2bin      Convert text format to binary TYP
+  extract      Extract TYP files from .img containers
+  info         Display TYP file information
+  validate     Validate TYP file structure
   version      Show version information
   help         Show help for any command
 ```
@@ -93,9 +136,10 @@ Available Commands:
 ### bin2txt Flags
 
 ```
-  -o, --output FILE   Output file path (default: stdout)
-  --no-xpm            Skip XPM bitmap data
-  --no-labels         Skip label strings
+  -o, --output FILE     Output file path (default: stdout)
+  --format FORMAT       Output format: mkgmap (default), json
+  --no-xpm             Skip XPM bitmap data
+  --no-labels          Skip label strings
 ```
 
 ### txt2bin Flags
@@ -108,6 +152,27 @@ Available Commands:
 ```
 
 **Note**: The `--codepage` flag is optional. If not specified, typconv automatically reads the CodePage from the `[_id]` section of your text file.
+
+### extract Flags
+
+```
+  -o, --output DIR         Output directory (required for extraction)
+  -l, --list              List TYP files without extracting
+  --all                   Extract all TYP files (default: first only)
+```
+
+### info Flags
+
+```
+  --json               Output as JSON
+  --brief              Show only summary (one-line format)
+```
+
+### validate Flags
+
+```
+  --strict             Fail on warnings (useful for CI/CD)
+```
 
 ### Character Encoding
 
@@ -177,6 +242,31 @@ typconv txt2bin editable.txt -o custom.typ
 for f in *.typ; do
     typconv bin2txt "$f" -o "${f%.typ}.txt"
 done
+
+# Get quick info on all TYP files
+for f in *.typ; do
+    typconv info "$f" --brief
+done
+
+# Validate all TYP files
+for f in *.typ; do
+    echo "Validating $f..."
+    typconv validate "$f" || echo "FAILED: $f"
+done
+```
+
+### JSON Processing
+
+```bash
+# Convert to JSON for analysis
+typconv bin2txt map.typ --format json -o map.json
+
+# Query with jq
+typconv bin2txt map.typ --format json | jq '.points | length'
+typconv bin2txt map.typ --format json | jq '.header.codepage'
+
+# Extract all point types
+typconv bin2txt map.typ --format json | jq '.points[].type'
 ```
 
 ## Text Format
@@ -226,15 +316,13 @@ DayXpm="8 8 2 1"
 - ✅ Automatic CodePage detection
 - ✅ XPM bitmap handling (day/night patterns)
 - ✅ Multi-language label support
+- ✅ JSON output format (bin2txt --format json)
+- ✅ `info` command - Display TYP file metadata
+- ✅ `validate` command - Validate TYP file structure
+- ✅ `extract` command - Extract TYP files from .img containers
 - ✅ Comprehensive test suite
 
-### Not Yet Implemented
-- ⏳ `extract` command - Extract TYP from .img container files
-- ⏳ `info` command - Display TYP file metadata
-- ⏳ `validate` command - Validate TYP file structure
-- ⏳ JSON output format
-
-**The core mission is complete**: typconv can successfully convert binary TYP files to text and back, preserving all data including non-ASCII characters. This is the primary functionality needed for editing Garmin TYP files on Linux.
+**All core features are complete**: typconv provides a complete toolset for working with Garmin TYP files on Linux, including conversion, extraction, inspection, validation, and JSON export.
 
 ## Testing
 

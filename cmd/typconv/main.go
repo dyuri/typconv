@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
+	"github.com/dyuri/typconv/internal/img"
 	"github.com/dyuri/typconv/internal/model"
 	"github.com/dyuri/typconv/pkg/typconv"
 	"github.com/spf13/cobra"
@@ -29,8 +31,9 @@ var rootCmd = &cobra.Command{
 	Short: "Convert Garmin TYP files between binary and text formats",
 	Long: `typconv is a tool for working with Garmin TYP files.
 
-It can convert between binary and text formats, extract TYP files
-from .img containers, and validate TYP file structure.
+It can convert between binary and text formats, extract TYP files from
+.img containers, inspect file metadata, validate structure, and export
+to JSON format.
 
 This is the first native Linux implementation of the binary TYP format.`,
 }
@@ -407,13 +410,60 @@ func runExtract(cmd *cobra.Command, args []string) error {
 	list, _ := cmd.Flags().GetBool("list")
 	all, _ := cmd.Flags().GetBool("all")
 
-	// TODO: Implement extract
-	_ = inputPath
-	_ = outputPath
-	_ = list
-	_ = all
+	// For listing, we still need to extract to a temp directory
+	extractDir := outputPath
+	if list || extractDir == "" {
+		// Use temp directory for listing or if no output specified
+		tempDir, err := os.MkdirTemp("", "typconv-extract-*")
+		if err != nil {
+			return fmt.Errorf("create temp directory: %w", err)
+		}
+		if list {
+			// Clean up temp directory after listing
+			defer os.RemoveAll(tempDir)
+		}
+		extractDir = tempDir
+	}
 
-	return fmt.Errorf("extract not yet implemented")
+	// Extract TYP files from .img
+	extractedFiles, err := img.ExtractTYP(inputPath, extractDir)
+	if err != nil {
+		return err
+	}
+
+	// If listing, just show the files and return
+	if list {
+		fmt.Printf("Found %d TYP file(s) in %s:\n", len(extractedFiles), filepath.Base(inputPath))
+		for _, file := range extractedFiles {
+			// Get file info
+			stat, err := os.Stat(file)
+			if err != nil {
+				fmt.Printf("  - %s (error reading: %v)\n", filepath.Base(file), err)
+				continue
+			}
+			fmt.Printf("  - %s (%d bytes)\n", filepath.Base(file), stat.Size())
+		}
+		return nil
+	}
+
+	// If not extracting all, keep only the first file
+	if !all && len(extractedFiles) > 1 {
+		// Remove extra files
+		for i := 1; i < len(extractedFiles); i++ {
+			os.Remove(extractedFiles[i])
+		}
+		extractedFiles = extractedFiles[:1]
+		fmt.Printf("Extracted first TYP file (use --all to extract all files)\n")
+	}
+
+	// Show what was extracted
+	fmt.Printf("Extracted %d TYP file(s) to %s:\n", len(extractedFiles), extractDir)
+	for _, file := range extractedFiles {
+		stat, _ := os.Stat(file)
+		fmt.Printf("  - %s (%d bytes)\n", filepath.Base(file), stat.Size())
+	}
+
+	return nil
 }
 
 // info command
@@ -685,11 +735,293 @@ func runValidate(cmd *cobra.Command, args []string) error {
 	inputPath := args[0]
 	strict, _ := cmd.Flags().GetBool("strict")
 
-	// TODO: Implement validate
-	_ = inputPath
-	_ = strict
+	// Open input file
+	f, err := os.Open(inputPath)
+	if err != nil {
+		return fmt.Errorf("open input file: %w", err)
+	}
+	defer f.Close()
 
-	return fmt.Errorf("validate not yet implemented")
+	// Get file size
+	stat, err := f.Stat()
+	if err != nil {
+		return fmt.Errorf("stat input file: %w", err)
+	}
+
+	// Parse binary TYP
+	typ, err := typconv.ParseBinaryTYP(f, stat.Size())
+	if err != nil {
+		return fmt.Errorf("parse TYP file: %w", err)
+	}
+
+	// Validate the file
+	validator := newValidator(strict)
+	validator.validate(typ, inputPath)
+
+	// Print results
+	validator.printResults()
+
+	// Return error if validation failed
+	if validator.hasErrors() || (strict && validator.hasWarnings()) {
+		return fmt.Errorf("validation failed")
+	}
+
+	return nil
+}
+
+// Validator holds validation state
+type validator struct {
+	strict   bool
+	errors   []string
+	warnings []string
+	file     string
+}
+
+func newValidator(strict bool) *validator {
+	return &validator{
+		strict:   strict,
+		errors:   make([]string, 0),
+		warnings: make([]string, 0),
+	}
+}
+
+func (v *validator) error(msg string, args ...interface{}) {
+	v.errors = append(v.errors, fmt.Sprintf(msg, args...))
+}
+
+func (v *validator) warning(msg string, args ...interface{}) {
+	v.warnings = append(v.warnings, fmt.Sprintf(msg, args...))
+}
+
+func (v *validator) hasErrors() bool {
+	return len(v.errors) > 0
+}
+
+func (v *validator) hasWarnings() bool {
+	return len(v.warnings) > 0
+}
+
+func (v *validator) validate(typ *model.TYPFile, file string) {
+	v.file = file
+
+	// Validate header
+	v.validateHeader(&typ.Header)
+
+	// Validate points
+	v.validatePoints(typ.Points)
+
+	// Validate lines
+	v.validateLines(typ.Lines)
+
+	// Validate polygons
+	v.validatePolygons(typ.Polygons)
+}
+
+func (v *validator) validateHeader(h *model.Header) {
+	// Check CodePage
+	validCodePages := map[int]bool{
+		437: true, 1250: true, 1251: true, 1252: true, 1254: true, 65001: true,
+	}
+	if !validCodePages[h.CodePage] {
+		v.warning("Unusual CodePage: %d (common values: 1252, 1250, 1251, 437)", h.CodePage)
+	}
+
+	// Check FID/PID ranges
+	if h.FID < 0 || h.FID > 65535 {
+		v.error("Invalid FID: %d (must be 0-65535)", h.FID)
+	}
+	if h.PID < 0 || h.PID > 65535 {
+		v.error("Invalid PID: %d (must be 0-65535)", h.PID)
+	}
+}
+
+func (v *validator) validatePoints(points []model.PointType) {
+	if len(points) == 0 {
+		v.warning("No point types defined")
+		return
+	}
+
+	seenTypes := make(map[int]bool)
+	for i, pt := range points {
+		// Check for duplicate types
+		typeKey := pt.Type<<8 | pt.SubType
+		if seenTypes[typeKey] {
+			v.warning("Duplicate point type: 0x%04x (subtype 0x%x)", pt.Type, pt.SubType)
+		}
+		seenTypes[typeKey] = true
+
+		// Validate type code (extended types can go beyond 0xFFFF)
+		if pt.Type < 0 || pt.Type > 0x1FFFF {
+			v.error("Point %d: invalid type code 0x%x (must be 0x00-0x1FFFF)", i, pt.Type)
+		}
+		if pt.Type > 0xFFFF {
+			v.warning("Point %d: extended type code 0x%x", i, pt.Type)
+		}
+
+		// Validate subtype
+		if pt.SubType < 0 || pt.SubType > 0x1F {
+			v.warning("Point %d: unusual subtype 0x%x (expected 0x00-0x1F)", i, pt.SubType)
+		}
+
+		// Validate bitmaps
+		if pt.DayIcon != nil {
+			v.validateBitmap(pt.DayIcon, fmt.Sprintf("Point %d day icon", i))
+		}
+		if pt.NightIcon != nil {
+			v.validateBitmap(pt.NightIcon, fmt.Sprintf("Point %d night icon", i))
+		}
+
+		// Check for labels
+		if len(pt.Labels) == 0 {
+			v.warning("Point 0x%04x has no labels", pt.Type)
+		}
+	}
+}
+
+func (v *validator) validateLines(lines []model.LineType) {
+	if len(lines) == 0 {
+		v.warning("No line types defined")
+		return
+	}
+
+	seenTypes := make(map[int]bool)
+	for i, lt := range lines {
+		// Check for duplicate types
+		typeKey := lt.Type<<8 | lt.SubType
+		if seenTypes[typeKey] {
+			v.warning("Duplicate line type: 0x%04x (subtype 0x%x)", lt.Type, lt.SubType)
+		}
+		seenTypes[typeKey] = true
+
+		// Validate type code (extended types can go beyond 0xFFFF)
+		if lt.Type < 0 || lt.Type > 0x1FFFF {
+			v.error("Line %d: invalid type code 0x%x (must be 0x00-0x1FFFF)", i, lt.Type)
+		}
+		if lt.Type > 0xFFFF {
+			v.warning("Line %d: extended type code 0x%x", i, lt.Type)
+		}
+
+		// Validate widths
+		if lt.LineWidth < 0 || lt.LineWidth > 255 {
+			v.warning("Line %d: unusual line width %d", i, lt.LineWidth)
+		}
+		if lt.BorderWidth < 0 || lt.BorderWidth > 255 {
+			v.warning("Line %d: unusual border width %d", i, lt.BorderWidth)
+		}
+		if lt.BorderWidth > 0 && lt.LineWidth == 0 {
+			v.warning("Line %d: has border but no line width", i)
+		}
+
+		// Validate patterns
+		if lt.DayPattern != nil {
+			v.validateBitmap(lt.DayPattern, fmt.Sprintf("Line %d day pattern", i))
+		}
+		if lt.NightPattern != nil {
+			v.validateBitmap(lt.NightPattern, fmt.Sprintf("Line %d night pattern", i))
+		}
+	}
+}
+
+func (v *validator) validatePolygons(polygons []model.PolygonType) {
+	if len(polygons) == 0 {
+		v.warning("No polygon types defined")
+		return
+	}
+
+	seenTypes := make(map[int]bool)
+	for i, poly := range polygons {
+		// Check for duplicate types
+		typeKey := poly.Type<<8 | poly.SubType
+		if seenTypes[typeKey] {
+			v.warning("Duplicate polygon type: 0x%04x (subtype 0x%x)", poly.Type, poly.SubType)
+		}
+		seenTypes[typeKey] = true
+
+		// Validate type code (extended types can go beyond 0xFFFF)
+		if poly.Type < 0 || poly.Type > 0x1FFFF {
+			v.error("Polygon %d: invalid type code 0x%x (must be 0x00-0x1FFFF)", i, poly.Type)
+		}
+		if poly.Type > 0xFFFF {
+			v.warning("Polygon %d: extended type code 0x%x", i, poly.Type)
+		}
+
+		// Validate patterns
+		if poly.DayPattern != nil {
+			v.validateBitmap(poly.DayPattern, fmt.Sprintf("Polygon %d day pattern", i))
+		}
+		if poly.NightPattern != nil {
+			v.validateBitmap(poly.NightPattern, fmt.Sprintf("Polygon %d night pattern", i))
+		}
+	}
+}
+
+func (v *validator) validateBitmap(bm *model.Bitmap, context string) {
+	// Check dimensions
+	if bm.Width <= 0 || bm.Width > 256 {
+		v.error("%s: invalid width %d", context, bm.Width)
+	}
+	if bm.Height <= 0 || bm.Height > 256 {
+		v.error("%s: invalid height %d", context, bm.Height)
+	}
+
+	// Warn about unusually large bitmaps
+	if bm.Width > 64 || bm.Height > 64 {
+		v.warning("%s: unusually large bitmap %dx%d", context, bm.Width, bm.Height)
+	}
+
+	// Check palette
+	if len(bm.Palette) == 0 {
+		v.warning("%s: empty palette", context)
+	}
+	if len(bm.Palette) > 256 {
+		v.error("%s: palette too large (%d colors)", context, len(bm.Palette))
+	}
+
+	// Check pixel data
+	if len(bm.Data) == 0 {
+		v.error("%s: no pixel data", context)
+	}
+}
+
+func (v *validator) printResults() {
+	fmt.Printf("Validating: %s\n", v.file)
+	fmt.Println(strings.Repeat("=", 50))
+
+	if len(v.errors) == 0 && len(v.warnings) == 0 {
+		fmt.Println("✓ Valid TYP file - no issues found")
+		return
+	}
+
+	// Print errors
+	if len(v.errors) > 0 {
+		fmt.Printf("\nErrors (%d):\n", len(v.errors))
+		for _, err := range v.errors {
+			fmt.Printf("  ✗ %s\n", err)
+		}
+	}
+
+	// Print warnings
+	if len(v.warnings) > 0 {
+		fmt.Printf("\nWarnings (%d):\n", len(v.warnings))
+		for _, warn := range v.warnings {
+			fmt.Printf("  ⚠ %s\n", warn)
+		}
+	}
+
+	// Summary
+	fmt.Println()
+	if len(v.errors) > 0 {
+		fmt.Printf("Validation failed: %d error(s)", len(v.errors))
+		if len(v.warnings) > 0 {
+			fmt.Printf(", %d warning(s)", len(v.warnings))
+		}
+		fmt.Println()
+	} else if len(v.warnings) > 0 {
+		fmt.Printf("Validation passed with %d warning(s)\n", len(v.warnings))
+		if v.strict {
+			fmt.Println("(use without --strict to ignore warnings)")
+		}
+	}
 }
 
 // version command
