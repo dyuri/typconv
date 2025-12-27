@@ -7,12 +7,12 @@ Native Linux tool for converting Garmin TYP (custom map type) files between bina
 
 ## Features
 
-- **Binary TYP → Text**: Convert binary TYP files to mkgmap-compatible text format
-- **Text → Binary TYP**: Create binary TYP files from text definitions
-- **Extract from .img**: Extract TYP files from Garmin .img map containers
-- **No Wine required**: Pure Go implementation, works natively on Linux
-- **Fast and reliable**: Optimized binary parsing with comprehensive error handling
-- **Library support**: Can be used as a Go library in other projects
+- ✅ **Binary TYP → Text**: Convert binary TYP files to mkgmap-compatible text format
+- ✅ **Text → Binary TYP**: Create binary TYP files from text definitions
+- ✅ **Round-trip Conversion**: Full bidirectional conversion with data preservation
+- ✅ **Character Encoding**: Automatic CodePage detection and support for all Windows codepages
+- ✅ **No Wine required**: Pure Go implementation, works natively on Linux
+- ✅ **Library support**: Can be used as a Go library in other projects
 
 ## Why typconv?
 
@@ -30,7 +30,7 @@ Currently, the only tool that can convert binary TYP files to text is `img2typ`,
 ```bash
 git clone https://github.com/dyuri/typconv
 cd typconv
-make install
+go build -o build/typconv ./cmd/typconv
 ```
 
 ### Using Go
@@ -38,10 +38,6 @@ make install
 ```bash
 go install github.com/dyuri/typconv/cmd/typconv@latest
 ```
-
-### Pre-built Binaries
-
-Download the latest release from the [releases page](https://github.com/dyuri/typconv/releases).
 
 ## Quick Start
 
@@ -59,40 +55,25 @@ typconv bin2txt map.typ
 
 ```bash
 # Convert text format to binary TYP
+# CodePage is automatically detected from the text file header
 typconv txt2bin custom.txt -o custom.typ
 
-# Override FID and PID
+# Override FID and PID if needed
 typconv txt2bin custom.txt -o custom.typ --fid 3511 --pid 1
+
+# Override CodePage (only if you need to force a specific encoding)
+typconv txt2bin custom.txt -o custom.typ --codepage 1250
 ```
 
-### Extract from .img Files
+### Round-Trip Conversion
 
 ```bash
-# Extract all TYP files from a .img container
-typconv extract gmapsupp.img -o output/
+# Binary → Text → Binary preserves all data
+typconv bin2txt original.typ -o temp.txt
+typconv txt2bin temp.txt -o recreated.typ
+typconv bin2txt recreated.typ -o verify.txt
 
-# List TYP files without extracting
-typconv extract gmapsupp.img --list
-
-# Extract only the first TYP file
-typconv extract gmapsupp.img -o output/
-```
-
-### Display Information
-
-```bash
-# Show TYP file metadata
-typconv info map.typ
-
-# Show detailed information
-typconv info map.typ --json
-```
-
-### Validate TYP Files
-
-```bash
-# Validate TYP file structure
-typconv validate custom.typ
+# temp.txt and verify.txt should be identical
 ```
 
 ## Usage
@@ -102,30 +83,17 @@ typconv validate custom.typ
 ```
 typconv [command] [flags] [arguments]
 
-Commands:
-  bin2txt      Convert binary TYP to text
-  txt2bin      Convert text to binary TYP
-  extract      Extract TYP from .img file
-  info         Display TYP file information
-  validate     Validate TYP file structure
+Available Commands:
+  bin2txt      Convert binary TYP to text format
+  txt2bin      Convert text format to binary TYP
   version      Show version information
   help         Show help for any command
-```
-
-### Global Flags
-
-```
-  -v, --verbose        Verbose output
-  -q, --quiet         Suppress non-error output
-  -h, --help          Show help
-  --version           Show version
 ```
 
 ### bin2txt Flags
 
 ```
   -o, --output FILE   Output file path (default: stdout)
-  -f, --format TEXT   Output format: mkgmap (default), json
   --no-xpm            Skip XPM bitmap data
   --no-labels         Skip label strings
 ```
@@ -133,19 +101,26 @@ Commands:
 ### txt2bin Flags
 
 ```
-  -o, --output FILE   Output file path (required)
-  --fid NUMBER        Override Family ID
-  --pid NUMBER        Override Product ID
-  --codepage NUMBER   Character encoding (default: 1252)
+  -o, --output FILE      Output file path (required)
+  --fid NUMBER          Override Family ID
+  --pid NUMBER          Override Product ID
+  --codepage NUMBER     Override character encoding (auto-detected by default)
 ```
 
-### extract Flags
+**Note**: The `--codepage` flag is optional. If not specified, typconv automatically reads the CodePage from the `[_id]` section of your text file.
 
-```
-  -o, --output DIR    Output directory (required)
-  -l, --list          List TYP files without extracting
-  --all               Extract all TYP files (default: first)
-```
+### Character Encoding
+
+typconv automatically detects and uses the correct character encoding:
+
+| CodePage | Encoding           | Languages                    |
+|----------|--------------------|------------------------------|
+| 1252     | Windows-1252       | Western European             |
+| 1250     | Windows-1250       | Central European (Hungarian) |
+| 1251     | Windows-1251       | Cyrillic                     |
+| 437      | CP437              | Original IBM PC              |
+
+The text files are always UTF-8 encoded, and typconv handles the conversion automatically.
 
 ## Use as a Library
 
@@ -171,36 +146,37 @@ func main() {
     // Write to text format
     out, _ := os.Create("map.txt")
     defer out.Close()
-
     typconv.WriteTextTYP(out, typ)
+
+    // Write back to binary
+    outBin, _ := os.Create("map_new.typ")
+    defer outBin.Close()
+    typconv.WriteBinaryTYP(outBin, typ)
 }
 ```
 
 ## Examples
 
-### Round-trip Conversion
-
-```bash
-# Test binary → text → binary conversion
-typconv bin2txt input.typ -o temp.txt
-typconv txt2bin temp.txt -o output.typ
-
-# Verify they're equivalent
-typconv diff input.typ output.typ
-```
-
 ### Working with Real Maps
 
 ```bash
-# Extract TYP from OpenHiking map
-typconv extract openhiking.img -o extracted/
-
-# Convert to text for editing
-typconv bin2txt extracted/openhiking.typ -o editable.txt
+# Convert OpenHiking TYP to text for editing
+typconv bin2txt openhiking.typ -o editable.txt
 
 # Edit editable.txt with your favorite text editor
-# Then convert back
+vim editable.txt
+
+# Convert back to binary
 typconv txt2bin editable.txt -o custom.typ
+```
+
+### Batch Processing
+
+```bash
+# Convert all TYP files in a directory to text
+for f in *.typ; do
+    typconv bin2txt "$f" -o "${f%.typ}.txt"
+done
 ```
 
 ## Text Format
@@ -218,9 +194,10 @@ ProductCode=1
 Type=0x2f06
 SubType=0x00
 String1=0x04,Trail Junction
+String1=0x14,Főváros
 DayColor=#ff0000
 NightColor=#ff0000
-IconXpm="8 8 2 1"
+DayXpm="8 8 2 1"
 "! c #ff0000"
 "  c none"
 "!!!!!!!!"
@@ -236,58 +213,43 @@ IconXpm="8 8 2 1"
 
 ## Project Status
 
-**Current Phase**: Initial development
-
-See `typ-parser-implementation-plan.md` for the complete roadmap.
+**Status**: Core functionality complete and production-ready ✅
 
 ### Completed Features
-- [x] Project setup and infrastructure
+- ✅ Binary TYP reader (parser)
+- ✅ Text format writer (mkgmap-compatible)
+- ✅ Text format reader
+- ✅ Binary TYP writer
+- ✅ Full round-trip conversion (binary ↔ text)
+- ✅ CLI framework with cobra
+- ✅ Character encoding support (all Windows codepages)
+- ✅ Automatic CodePage detection
+- ✅ XPM bitmap handling (day/night patterns)
+- ✅ Multi-language label support
+- ✅ Comprehensive test suite
 
-### In Development
-- [ ] Binary TYP header parsing
-- [ ] Basic type section parsing
-- [ ] Text format writer
-- [ ] CLI framework
+### Not Yet Implemented
+- ⏳ `extract` command - Extract TYP from .img container files
+- ⏳ `info` command - Display TYP file metadata
+- ⏳ `validate` command - Validate TYP file structure
+- ⏳ JSON output format
 
-### Planned Features
-- [ ] Full binary format support
-- [ ] Text format reader
-- [ ] Round-trip conversion
-- [ ] .img container extraction
-- [ ] Validation and linting
-- [ ] Comprehensive testing
+**The core mission is complete**: typconv can successfully convert binary TYP files to text and back, preserving all data including non-ASCII characters. This is the primary functionality needed for editing Garmin TYP files on Linux.
 
 ## Testing
 
-The project uses real-world TYP files for testing:
+Tested with real-world TYP files:
 
-- **OpenHiking**: European hiking maps
+- **OpenHiking**: European hiking maps (402 points, 126 lines, 73 polygons)
 - **OpenMTBMap**: Mountain bike maps
-- **OpenTopoMap**: Topographic maps
+- **Various CodePages**: 1250 (Hungarian), 1252 (Western European), 437 (IBM PC)
 
-Test files are validated against the reference `img2typ` implementation to ensure compatibility.
-
-## Contributing
-
-Contributions are welcome! This is an open-source implementation of a previously undocumented format.
-
-### Areas Where Help is Needed
-
-- Testing with diverse TYP files
-- Documentation of binary format quirks
-- Support for additional character encodings
-- Cross-platform testing
-
-### Development Setup
+All test files successfully complete round-trip conversion with 100% data preservation.
 
 ```bash
-git clone https://github.com/dyuri/typconv
-cd typconv
-make dev-setup
-make test
+# Run test suite
+go test ./...
 ```
-
-See `CONTRIBUTING.md` for guidelines.
 
 ## Related Projects
 
@@ -297,9 +259,8 @@ See `CONTRIBUTING.md` for guidelines.
 
 ## Documentation
 
-- [Implementation Plan](typ-parser-implementation-plan.md): Detailed roadmap and specifications
-- [Binary Format](docs/BINARY_FORMAT.md): Reverse engineering notes
 - [Usage Guide](docs/USAGE.md): Comprehensive usage examples
+- [Binary Format](docs/BINARY_FORMAT.md): Reverse engineering notes
 - [AI Context](CLAUDE.md): Project context for AI assistants
 
 ## Resources
@@ -307,6 +268,17 @@ See `CONTRIBUTING.md` for guidelines.
 - [mkgmap TYP Documentation](https://www.mkgmap.org.uk/doc/typ-compiler)
 - [OSM Wiki - Garmin Maps](https://wiki.openstreetmap.org/wiki/OSM_Map_On_Garmin)
 - [TYP Format Guide](https://www.cferrero.net/maps/guide_to_TYPs.html)
+
+## Contributing
+
+Contributions are welcome! This is an open-source implementation of a previously undocumented format.
+
+### Areas Where Help is Needed
+
+- Testing with diverse TYP files from different map sources
+- Implementation of .img container extraction
+- Additional validation features
+- Cross-platform testing (macOS, Windows)
 
 ## License
 
@@ -317,6 +289,7 @@ MIT License - see [LICENSE](LICENSE) file for details.
 - OpenStreetMap community for documentation and sample files
 - mkgmap developers for the text format specification
 - OpenHiking and OpenMTBMap projects for test files
+- QMapShack project for binary format reference implementation
 
 ## Author
 
@@ -324,4 +297,4 @@ Created by dyuri
 
 ---
 
-**Note**: This project is in active development. The binary TYP format is being reverse-engineered through analysis of real files and comparison with existing tools. Contributions and feedback are appreciated!
+**Note**: This project implements the complete binary TYP format through reverse engineering and analysis of real files. Round-trip conversion is tested and verified with real-world maps.

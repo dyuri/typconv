@@ -242,19 +242,29 @@ Keep dependencies minimal:
 - Works with popular maps (OpenHiking, OpenMTBMap)
 - Can be used as library by typtui
 
-## Current Development Focus
+## Current Development Status
 
-**Immediate priorities:**
-1. Set up basic project infrastructure (README, LICENSE, docs)
-2. Implement basic CLI framework with cobra
-3. Create data model in `internal/model`
-4. Implement binary header parsing
-5. Test with real TYP files
+**Core Functionality: COMPLETE ✅**
 
-**Next phase:**
-- Full binary reader implementation
-- Text format writer
-- Round-trip testing
+All essential features have been implemented and tested:
+1. ✅ Binary TYP reader (full parser)
+2. ✅ Text format writer (mkgmap-compatible)
+3. ✅ Text format reader
+4. ✅ Binary TYP writer
+5. ✅ CLI framework with bin2txt and txt2bin commands
+6. ✅ Character encoding (automatic CodePage detection)
+7. ✅ Round-trip conversion verified with real maps
+
+**Tested with:**
+- OpenHiking maps (oh_3690.typ: 402 points, 126 lines, 73 polygons)
+- OpenMTBMap files (M00000.typ: 73 points, 21 lines, 31 polygons)
+- Multiple CodePages: 1250 (Hungarian), 1252 (Western European), 437 (IBM PC)
+
+**Optional Future Enhancements:**
+- .img container extraction (`extract` command)
+- Metadata display (`info` command)
+- Structure validation (`validate` command)
+- JSON output format
 
 ## Notes for AI Assistants
 
@@ -266,14 +276,20 @@ Keep dependencies minimal:
 - **Performance matters**: Binary parsing should be fast
 - **The goal is Linux native**: No Wine, no Windows dependencies
 
-## Questions/Uncertainties
+## Resolved Questions
 
-Track unknowns here as development progresses:
+The following unknowns have been resolved through implementation:
 
-- [ ] Exact binary format for extended types (subtypes >0x1F)
-- [ ] Handling of NT map format variations
-- [ ] All CodePage values and their encodings
-- [ ] Meaning of reserved/unknown header fields
-- [ ] Draw order section exact format
+- [x] Extended types (subtypes >0x1F) - Handled through bit-packing in type/subtype encoding
+- [x] CodePage values and encodings - Implemented support for all Windows codepages (1250, 1251, 1252, 437, etc.)
+- [x] Label length calculation - Discovered QMapShack algorithm: `actualLength * 2*n + n`
+- [x] Day/night pattern handling - Use color type 0x00/0x08 when only one pattern exists
+- [x] Character encoding - UTF-8 text files ↔ Windows codepage binary files
 
-Update this file as you discover answers!
+## Remaining Unknowns
+
+Minor details that don't affect core functionality:
+
+- [ ] Some reserved/unknown header fields (offsets 0x51-0x57)
+- [ ] Draw order section exact semantics (basic implementation works)
+- [ ] NT map format variations (not needed for standard TYP files)
