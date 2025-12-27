@@ -60,10 +60,17 @@ func WriteTextTYP(w io.Writer, typ *model.TYPFile) error {
 
 // ParseTextTYP reads a mkgmap text format TYP file.
 //
-// Currently not implemented.
+// The input should be in mkgmap-compatible text format with
+// [_id], [_point], [_line], and [_polygon] sections.
+//
+// Example:
+//
+//	f, _ := os.Open("map.txt")
+//	defer f.Close()
+//	typ, err := ParseTextTYP(f)
 func ParseTextTYP(r io.Reader) (*model.TYPFile, error) {
-	// TODO: Implement text parser
-	return nil, ErrNotImplemented
+	reader := text.NewReader(r)
+	return reader.Read()
 }
 
 // WriteBinaryTYP writes a binary TYP file.
