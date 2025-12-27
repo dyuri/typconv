@@ -21,7 +21,8 @@
       "Bash(./tools/nav.js:*)",
       "Bash(./tools/eval.js 'JSON.stringify\\(Array.from\\(document.querySelectorAll\\(\"\".search-title a\"\"\\)\\).slice\\(0, 20\\).map\\(a => \\({ file: a.textContent.trim\\(\\), href: a.href }\\)\\)\\)')",
       "Bash(./tools/eval.js 'document.querySelector\\(\"\".blob-code-content\"\"\\) ? Array.from\\(document.querySelectorAll\\(\"\".blob-code-content\"\"\\)\\).map\\(e => e.textContent\\).join\\(\"\"\\\\n\"\"\\) : document.querySelector\\(\"\"pre\"\"\\) ? document.querySelector\\(\"\"pre\"\"\\).textContent : \"\"Not found\"\"')",
-      "Bash(git clone:*)"
+      "Bash(git clone:*)",
+      "Bash(go build:*)"
     ]
   }
 }

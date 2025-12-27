@@ -171,14 +171,47 @@ func runTxt2Bin(cmd *cobra.Command, args []string) error {
 	pid, _ := cmd.Flags().GetInt("pid")
 	codepage, _ := cmd.Flags().GetInt("codepage")
 
-	// TODO: Implement txt2bin
-	_ = inputPath
-	_ = outputPath
-	_ = fid
-	_ = pid
-	_ = codepage
+	// Open input file
+	f, err := os.Open(inputPath)
+	if err != nil {
+		return fmt.Errorf("open input file: %w", err)
+	}
+	defer f.Close()
 
-	return fmt.Errorf("txt2bin not yet implemented")
+	// Parse text TYP
+	typ, err := typconv.ParseTextTYP(f)
+	if err != nil {
+		return fmt.Errorf("parse text TYP: %w", err)
+	}
+
+	// Override header fields if specified
+	if fid != 0 {
+		typ.Header.FID = fid
+	}
+	if pid != 0 {
+		typ.Header.PID = pid
+	}
+	if codepage != 0 {
+		typ.Header.CodePage = codepage
+	}
+
+	// Create output file
+	out, err := os.Create(outputPath)
+	if err != nil {
+		return fmt.Errorf("create output file: %w", err)
+	}
+	defer out.Close()
+
+	// Write binary TYP
+	if err := typconv.WriteBinaryTYP(out, typ); err != nil {
+		return fmt.Errorf("write binary TYP: %w", err)
+	}
+
+	fmt.Fprintf(os.Stderr, "Successfully converted %s to %s\n", inputPath, outputPath)
+	fmt.Fprintf(os.Stderr, "  Points: %d, Lines: %d, Polygons: %d\n",
+		len(typ.Points), len(typ.Lines), len(typ.Polygons))
+
+	return nil
 }
 
 // extract command

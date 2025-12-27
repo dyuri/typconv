@@ -75,10 +75,17 @@ func ParseTextTYP(r io.Reader) (*model.TYPFile, error) {
 
 // WriteBinaryTYP writes a binary TYP file.
 //
-// Currently not implemented.
+// The output will be in Garmin binary TYP format, compatible with
+// Garmin GPS devices and mapping software.
+//
+// Example:
+//
+//	out, _ := os.Create("map.typ")
+//	defer out.Close()
+//	err := WriteBinaryTYP(out, typ)
 func WriteBinaryTYP(w io.Writer, typ *model.TYPFile) error {
-	// TODO: Implement binary writer
-	return ErrNotImplemented
+	writer := binary.NewWriter(w)
+	return writer.Write(typ)
 }
 
 // ValidationError represents a validation issue found in a TYP file
