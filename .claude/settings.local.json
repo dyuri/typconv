@@ -22,7 +22,10 @@
       "Bash(./tools/eval.js 'JSON.stringify\\(Array.from\\(document.querySelectorAll\\(\"\".search-title a\"\"\\)\\).slice\\(0, 20\\).map\\(a => \\({ file: a.textContent.trim\\(\\), href: a.href }\\)\\)\\)')",
       "Bash(./tools/eval.js 'document.querySelector\\(\"\".blob-code-content\"\"\\) ? Array.from\\(document.querySelectorAll\\(\"\".blob-code-content\"\"\\)\\).map\\(e => e.textContent\\).join\\(\"\"\\\\n\"\"\\) : document.querySelector\\(\"\"pre\"\"\\) ? document.querySelector\\(\"\"pre\"\"\\).textContent : \"\"Not found\"\"')",
       "Bash(git clone:*)",
-      "Bash(go build:*)"
+      "Bash(go build:*)",
+      "Bash(find:*)",
+      "Bash(if [ -f /tmp/auto_codepage.typ ])",
+      "Bash(then xxd -s 0x15 -l 2 /tmp/auto_codepage.typ)"
     ]
   }
 }

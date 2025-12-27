@@ -191,9 +191,16 @@ func runTxt2Bin(cmd *cobra.Command, args []string) error {
 	if pid != 0 {
 		typ.Header.PID = pid
 	}
-	if codepage != 0 {
+	// Only override CodePage if explicitly specified
+	// Otherwise, use the CodePage from the text file
+	if codepage != 0 && codepage != 1252 {
+		// User explicitly specified a non-default codepage
 		typ.Header.CodePage = codepage
+	} else if typ.Header.CodePage == 0 {
+		// No CodePage in file and no explicit override, use default
+		typ.Header.CodePage = 1252
 	}
+	// Otherwise, use the CodePage from the parsed file
 
 	// Create output file
 	out, err := os.Create(outputPath)
@@ -208,6 +215,7 @@ func runTxt2Bin(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Fprintf(os.Stderr, "Successfully converted %s to %s\n", inputPath, outputPath)
+	fmt.Fprintf(os.Stderr, "  CodePage: %d, FID: %d, PID: %d\n", typ.Header.CodePage, typ.Header.FID, typ.Header.PID)
 	fmt.Fprintf(os.Stderr, "  Points: %d, Lines: %d, Polygons: %d\n",
 		len(typ.Points), len(typ.Lines), len(typ.Polygons))
 
