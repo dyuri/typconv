@@ -740,6 +740,7 @@ func (r *Reader) calculateBPP(ncolors int) int {
 
 // readLabels reads the label section
 // Returns labels map, bytes read, and error
+// Based on QMapShack implementation - uses special length counting
 func (r *Reader) readLabels(buf []byte) (map[string]string, int, error) {
 	if len(buf) < 1 {
 		return nil, 0, fmt.Errorf("buffer too small for labels")
@@ -749,47 +750,83 @@ func (r *Reader) readLabels(buf []byte) (map[string]string, int, error) {
 	pos := 0
 
 	// Read length (1 or 2 bytes)
-	length := int(buf[pos])
-	n := 1 // number of bytes used for length field
+	t8 := buf[pos]
+	length := int(t8)
+	n := 1 // number of bytes in length field
 
-	if (length & 0x01) == 0 {
-		// 2-byte length
-		if len(buf) < 2 {
-			return nil, 0, fmt.Errorf("buffer too small for 2-byte length")
+	if (t8 & 0x01) == 0 {
+		// 2-byte length (bit 0 not set)
+		if pos+1 >= len(buf) {
+			return labels, pos+1, nil
 		}
 		n = 2
-		length = int(buf[pos]) | (int(buf[pos+1]) << 8)
+		pos++
+		t8 = buf[pos]
+		length |= int(t8) << 8
 	}
 
-	pos += n
+	pos++
+
+	// Subtract header size from length counter
+	// NOTE: length uses a special counting where each byte costs 2*n
 	length -= n
 
-	// Read label entries
+	// Read label entries while length counter > 0
 	for length > 0 && pos < len(buf) {
-		// Read language code
-		if pos >= len(buf) {
+		// Check if we've gone past reasonable bounds
+		if length < 2*n {
 			break
 		}
+
+		// Read language code
 		langCode := buf[pos]
 		pos++
 		length -= 2 * n
 
-		// Read null-terminated string
-		strStart := pos
-		for pos < len(buf) && buf[pos] != 0 {
-			pos++
-			length -= 2 * n
+		// Validate language code (Garmin uses 0x00-0x1F typically)
+		// If we see something suspicious, we've likely gone past the labels
+		if langCode > 0x40 && langCode != 0xbc { // 0xbc sometimes appears
+			// This is likely not a language code - back up and stop
+			pos--
+			break
 		}
 
 		if pos >= len(buf) {
 			break
 		}
 
-		// Decode string
-		labelText, _ := r.decodeString(buf[strStart:pos])
-		labels[fmt.Sprintf("%02x", langCode)] = labelText
+		// Read null-terminated string
+		var str []byte
+		maxStringLen := 256 // Safety limit
+		for length > 0 && pos < len(buf) && len(str) < maxStringLen {
+			t8 = buf[pos]
+			pos++
+			length -= 2 * n
 
-		pos++ // Skip null terminator
+			if t8 == 0 {
+				break
+			}
+
+			str = append(str, t8)
+		}
+
+		// Only store if we got a reasonable string
+		if len(str) > 0 && len(str) < maxStringLen {
+			labelText, _ := r.decodeString(str)
+
+			// Validate that the string contains mostly printable characters
+			// If more than 30% are non-printable, it's likely garbage
+			printableCount := 0
+			for _, r := range labelText {
+				if r >= 32 && r < 127 || r >= 160 { // Printable ASCII or extended
+					printableCount++
+				}
+			}
+
+			if len(labelText) > 0 && (printableCount*100/len(labelText)) >= 70 {
+				labels[fmt.Sprintf("%02x", langCode)] = labelText
+			}
+		}
 	}
 
 	return labels, pos, nil
