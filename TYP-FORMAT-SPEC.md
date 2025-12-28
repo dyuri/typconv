@@ -194,10 +194,20 @@ len -= n;  // Subtract length field size
 
 Then repeating for each language:
   Byte:      Language code (uint8)
-  Bytes:     Null-terminated string
-  len -= (2 * n) + string_length + 1
+  len -= 2 * n  // Each byte costs 2*n in the length counter
+
+  Then for each byte of the null-terminated string:
+    Byte:    Character (0x00 = terminator)
+    len -= 2 * n  // Each byte (including null) costs 2*n
 
 Continue until len == 0
+
+NOTE: This is the QMapShack algorithm - every single byte (language code +
+all string bytes including null terminator) decrements the counter by 2*n.
+For a label with n=1, lang=0x03, string "Test\0" (5 bytes):
+  Initial len includes: n + (2*n × 6) = 1 + 12 = 13
+  After header: len = 12
+  After processing: 12 - 2 - 2 - 2 - 2 - 2 - 2 = 0
 ```
 
 **Language code examples**:
@@ -341,6 +351,7 @@ Points data: offset=?, length=?
 
 ## Revision History
 
+- **2025-12-28**: Corrected label length calculation algorithm (lines 185-211) - every byte costs 2*n, not a single subtraction per entry
 - **2025-12-26**: Initial specification based on QMapShack code analysis
 
 ---
